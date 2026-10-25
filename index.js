@@ -579,6 +579,7 @@ async function handleDisboardMessage(msg) {
 let voiceMethods = null;
 let voiceConnection = null;
 let audioPlayer = null;
+let currentYtDlp = null;
 let currentFfmpeg = null;
 let currentTrackIndex = 0;
 let TRACKS = [];
@@ -672,53 +673,16 @@ function initPlayer() {
   });
 }
 
-function resolveStreamUrl(ytdlpBin, query) {
-  return new Promise((resolve) => {
-    const cleanQuery = (query || '').replace(/\s+audio$/i, '').trim();
-
-    // 1. First attempt: YouTube with android/ios client and node JS runtime
-    const ytArgs = [
-      '--no-warnings',
-      '--js-runtimes', 'node',
-      '--extractor-args', 'youtube:player_client=android,ios,mweb',
-      '-g',
-      `ytsearch1:${cleanQuery}`,
-      '-f', 'ba/b'
-    ];
-
-    execFile(ytdlpBin, ytArgs, { timeout: 15000 }, (err, stdout) => {
-      const ytUrl = stdout ? stdout.trim().split('\n').find(l => l.startsWith('http')) : null;
-      if (ytUrl) {
-        return resolve({ url: ytUrl, source: 'YouTube' });
-      }
-
-      // 2. Second attempt: SoundCloud with DRM filter (bypasses datacenter bot blocks 100%)
-      const scArgs = [
-        '--no-warnings',
-        '--match-filter', '!is_drm',
-        '-g',
-        `scsearch3:${cleanQuery}`,
-        '-f', 'ba/b'
-      ];
-
-      execFile(ytdlpBin, scArgs, { timeout: 15000 }, (scErr, scStdout) => {
-        const lines = scStdout ? scStdout.trim().split('\n').filter(l => l.startsWith('http')) : [];
-        const scUrl = lines[0]?.trim();
-        if (scUrl) {
-          return resolve({ url: scUrl, source: 'SoundCloud' });
-        }
-        resolve({ url: null, error: scErr ? scErr.message : (err ? err.message : 'No stream found') });
-      });
-    });
-  });
-}
-
 async function playNextTrack() {
   if (!TRACKS || TRACKS.length === 0) return;
 
   const t = TRACKS[currentTrackIndex];
   log(`[Workout Radio] Resolving Track ${t.index}/${TRACKS.length}: "${t.title}" by ${t.artist}...`);
 
+  if (currentYtDlp) {
+    try { currentYtDlp.kill('SIGKILL'); } catch (e) {}
+    currentYtDlp = null;
+  }
   if (currentFfmpeg) {
     try { currentFfmpeg.kill('SIGKILL'); } catch (e) {}
     currentFfmpeg = null;
@@ -727,37 +691,44 @@ async function playNextTrack() {
   const ytdlpBin = await getYtDlpPath();
   const ffmpegBin = await getFfmpegPath();
 
-  const res = await resolveStreamUrl(ytdlpBin, t.query);
-  if (!res.url) {
-    log(`[Workout Radio Err] Skipping "${t.title}": ${res.error || 'Empty stream URL'}`);
-    currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-    setTimeout(playNextTrack, 2000);
-    return;
-  }
+  const cleanTitle = (t.title || '')
+    .replace(/\s*-\s*Super Slowed/i, '')
+    .replace(/\s*-\s*Viral Edit/i, '')
+    .replace(/\s*-\s*Slowed/i, '')
+    .replace(/\s*-\s*Remix/i, '')
+    .trim();
+  const cleanArtist = (t.artist || '').split(',')[0].trim();
+  const scQuery = `scsearch1:${cleanTitle} ${cleanArtist}`;
 
-  log(`[Workout Radio] Playing "${t.title}" via ${res.source}...`);
+  log(`[Workout Radio] Streaming "${t.title}" directly via yt-dlp pipe...`);
 
   try {
+    currentYtDlp = spawn(ytdlpBin, [
+      '--no-warnings',
+      '-o', '-',
+      '-f', 'ba/b',
+      scQuery
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+
     currentFfmpeg = spawn(ffmpegBin, [
-      '-reconnect', '1',
-      '-reconnect_streamed', '1',
-      '-reconnect_delay_max', '5',
-      '-i', res.url,
+      '-i', 'pipe:0',
       '-f', 's16le',
       '-ar', '48000',
       '-ac', '2',
       'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { stdio: ['pipe', 'pipe', 'ignore'] });
 
-    currentFfmpeg.stderr.on('data', (d) => {
-      const msg = d.toString();
-      if (msg.includes('Error') || msg.includes('Invalid')) {
-        log(`[FFmpeg Err] ${msg.trim()}`);
-      }
+    currentYtDlp.stdout.on('error', () => {});
+    currentFfmpeg.stdin.on('error', () => {});
+
+    currentYtDlp.stdout.pipe(currentFfmpeg.stdin);
+
+    currentYtDlp.on('error', (err) => {
+      log(`[yt-dlp Err] ${err.message}`);
     });
 
     currentFfmpeg.on('error', (ferr) => {
-      log(`[FFmpeg Spawn Err] ${ferr.message}`);
+      log(`[FFmpeg Err] ${ferr.message}`);
     });
 
     const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.Raw });
@@ -766,7 +737,7 @@ async function playNextTrack() {
       voiceConnection.subscribe(audioPlayer);
     }
   } catch (ferr) {
-    log(`[FFmpeg Catch Err] ${ferr.message}`);
+    log(`[Workout Radio Catch Err] ${ferr.message}`);
     currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
     setTimeout(playNextTrack, 2500);
   }
