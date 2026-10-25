@@ -637,6 +637,43 @@ function initPlayer() {
   });
 }
 
+function resolveStreamUrl(ytdlpBin, query) {
+  return new Promise((resolve) => {
+    // 1. First attempt: YouTube with android/ios client and node JS runtime
+    const ytArgs = [
+      '--no-warnings',
+      '--js-runtimes', 'node',
+      '--extractor-args', 'youtube:player_client=android,ios,mweb',
+      '-g',
+      `ytsearch1:${query}`,
+      '-f', 'ba/b'
+    ];
+
+    execFile(ytdlpBin, ytArgs, { timeout: 15000 }, (err, stdout) => {
+      const ytUrl = stdout ? stdout.trim().split('\n').find(l => l.startsWith('http')) : null;
+      if (ytUrl) {
+        return resolve({ url: ytUrl, source: 'YouTube' });
+      }
+
+      // 2. Second attempt: SoundCloud (bypasses datacenter bot blocks 100%)
+      const scArgs = [
+        '--no-warnings',
+        '-g',
+        `scsearch1:${query}`,
+        '-f', 'ba/b'
+      ];
+
+      execFile(ytdlpBin, scArgs, { timeout: 15000 }, (scErr, scStdout) => {
+        const scUrl = scStdout ? scStdout.trim().split('\n').find(l => l.startsWith('http')) : null;
+        if (scUrl) {
+          return resolve({ url: scUrl, source: 'SoundCloud' });
+        }
+        resolve({ url: null, error: scErr ? scErr.message : (err ? err.message : 'No stream found') });
+      });
+    });
+  });
+}
+
 async function playNextTrack() {
   if (!TRACKS || TRACKS.length === 0) return;
 
@@ -651,50 +688,42 @@ async function playNextTrack() {
   const ytdlpBin = await getYtDlpPath();
   const ffmpegBin = ffmpegStatic || 'ffmpeg';
 
-  execFile(ytdlpBin, ['-g', `ytsearch1:${t.query}`, '-f', 'ba/b'], { timeout: 25000 }, (err, stdout) => {
-    if (err || !stdout) {
-      log(`[yt-dlp Err] Failed resolving "${t.title}": ${err ? err.message : 'Empty stream URL'}`);
-      currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-      setTimeout(playNextTrack, 2500);
-      return;
+  const res = await resolveStreamUrl(ytdlpBin, t.query);
+  if (!res.url) {
+    log(`[Workout Radio Err] Skipping "${t.title}": ${res.error || 'Empty stream URL'}`);
+    currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
+    setTimeout(playNextTrack, 2000);
+    return;
+  }
+
+  log(`[Workout Radio] Playing "${t.title}" via ${res.source}...`);
+
+  try {
+    currentFfmpeg = spawn(ffmpegBin, [
+      '-reconnect', '1',
+      '-reconnect_streamed', '1',
+      '-reconnect_delay_max', '5',
+      '-i', res.url,
+      '-f', 's16le',
+      '-ar', '48000',
+      '-ac', '2',
+      'pipe:1'
+    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+
+    currentFfmpeg.on('error', (ferr) => {
+      log(`[FFmpeg Err] ${ferr.message}`);
+    });
+
+    const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.Raw });
+    audioPlayer.play(resource);
+    if (voiceConnection) {
+      voiceConnection.subscribe(audioPlayer);
     }
-
-    const lines = stdout.trim().split('\n').filter(l => l.startsWith('http'));
-    const streamUrl = lines[0]?.trim();
-    if (!streamUrl) {
-      log(`[yt-dlp Err] No http stream URL found for "${t.title}". Skipping...`);
-      currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-      setTimeout(playNextTrack, 2500);
-      return;
-    }
-
-    try {
-      currentFfmpeg = spawn(ffmpegBin, [
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-i', streamUrl,
-        '-f', 's16le',
-        '-ar', '48000',
-        '-ac', '2',
-        'pipe:1'
-      ], { stdio: ['ignore', 'pipe', 'ignore'] });
-
-      currentFfmpeg.on('error', (ferr) => {
-        log(`[FFmpeg Err] ${ferr.message}`);
-      });
-
-      const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.Raw });
-      audioPlayer.play(resource);
-      if (voiceConnection) {
-        voiceConnection.subscribe(audioPlayer);
-      }
-    } catch (ferr) {
-      log(`[FFmpeg Spawn Err] ${ferr.message}`);
-      currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-      setTimeout(playNextTrack, 2500);
-    }
-  });
+  } catch (ferr) {
+    log(`[FFmpeg Spawn Err] ${ferr.message}`);
+    currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
+    setTimeout(playNextTrack, 2500);
+  }
 }
 
 // -------------------------------------------------------------
