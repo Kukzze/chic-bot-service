@@ -1040,6 +1040,76 @@ async function handleInteraction(interaction) {
       return;
     }
 
+    if (customId === "select_roles") {
+      const selected = data.values || [];
+      const currentRoles = member?.roles || [];
+      const added = [];
+      const removed = [];
+
+      for (const [roleId, roleName] of Object.entries(ALLOWED_SELF_ROLES)) {
+        const wants = selected.includes(roleId);
+        const has = currentRoles.includes(roleId);
+        if (wants && !has) {
+          added.push(roleName);
+          discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, "PUT").catch(() => {});
+        } else if (!wants && has) {
+          removed.push(roleName);
+          discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, "DELETE").catch(() => {});
+        }
+      }
+
+      let summary = "✅ **Roles Synchronized!**\n";
+      if (added.length > 0) summary += `• Equipped: **${added.join(", ")}**\n`;
+      if (removed.length > 0) summary += `• Removed: **${removed.join(", ")}**\n`;
+      if (added.length === 0 && removed.length === 0) summary += "No role changes made.\n";
+      summary += `\n*Keep grinding the discipline!* 💪⚡`;
+
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          content: summary,
+          flags: 64
+        }
+      });
+      return;
+    }
+
+    if (customId === "view_ranks_guide") {
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [
+            {
+              title: "🎖️ CHIC BUILDER // ATHLETE RANK HIERARCHY",
+              description: "Chic Gang ranks are dynamically calculated and unlocked through the **Chic Builder** workout engine. Track your lifts, achieve progressive overload, and unlock official athlete tiers on the server:\n\n🛡️ **Rank 1: Novice Lifter** (Levels 1–4)\n⚔️ **Rank 2: Iron Apprentice** (Levels 5–9)\n⚡ **Rank 3: Gym Regular** (Levels 10–19)\n🔥 **Rank 4: Heavy Lifter** (Levels 20–34)\n🔱 **Rank 5: Elite Athlete** (Levels 35–49)\n👑 **Rank 6: Greek God** (Levels 50–74)\n🌌 **Rank 7: Chic Titan** (Levels 75–99)\n💎 **Rank 8: Spotter Deity** (Levels 100+)\n\n*Log your training sets consistently to rank up and claim your role!*",
+              color: 0xF1C40F,
+              footer: { text: "Chic Gang Athlete Progression • Private Guide" }
+            }
+          ]
+        }
+      });
+      return;
+    }
+
+    if (customId === "view_staff_hierarchy") {
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [
+            {
+              title: "👑 Chic Gang | Leadership Hierarchy",
+              description: ">>> **The official server leadership & administration structure:**\n\n• **👑 Co-Founder / Founders** — Core server direction, product vision & engineering.\n• **🛡️ Moderators** — Community safety, form check moderation & respect enforcement.\n• **⚡ Verified Lifters** — Dedicated server athletes with verified status.\n\n*Reach out to any staff member via <#1562037195965993057> if you need assistance!*",
+              color: 0xE74C3C,
+              footer: { text: "Chic Gang Staff Desk" }
+            }
+          ]
+        }
+      });
+      return;
+    }
+
     if (customId === "open_ticket") {
       await respondInteraction(id, token, {
         type: 9,
