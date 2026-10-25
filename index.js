@@ -33,6 +33,7 @@ const BUMP_CH = "1563623243598798898";
 const MUSIC_CMD_CH = "1563625780150407289";
 const WORKOUT_RADIO_VC = "1563623245222252587";
 const WINS_CH = "1562037196238757926";
+const REP_COUNTER_CH = "1563828990521647156";
 
 // Categories
 const TICKETS_CAT_ID = "1563622199825404047";
@@ -527,6 +528,126 @@ async function handleChatKeywords(msg) {
       return;
     }
   }
+
+  if (content.includes(`<@${BOT_ID}>`) || content.includes(`<@!${BOT_ID}>`)) {
+    if (chId === REP_COUNTER_CH) {
+      await discordApi(`/channels/${chId}/messages`, "POST", {
+        content: `🏋️‍♂️ **Spotter on duty!** React system & barbell form checker are live. The barbell is currently racked at **${repState.currentCount} reps** (next rep is **${repState.currentCount + 1}**)! Drop your count lifters! 💪⚡`,
+        message_reference: { message_id: msg.id }
+      });
+      return;
+    }
+  }
+}
+
+// -------------------------------------------------------------
+// Rep Counter Barbell Form Checker & Milestone System
+// -------------------------------------------------------------
+const REP_STATE_FILE = process.env.REP_STATE_FILE || "./rep-counter.json";
+let repState = { currentCount: 0, lastUserId: null };
+
+try {
+  if (fs.existsSync(REP_STATE_FILE)) {
+    repState = JSON.parse(fs.readFileSync(REP_STATE_FILE, 'utf-8'));
+  }
+} catch (e) {}
+
+function saveRepState() {
+  try {
+    fs.writeFileSync(REP_STATE_FILE, JSON.stringify(repState, null, 2));
+  } catch (e) {}
+}
+
+async function handleRepCounterMessage(d) {
+  if (d.author?.bot) return;
+
+  const rawContent = (d.content || "").trim();
+  const match = rawContent.match(/^(\d+)$/);
+  if (!match) return;
+
+  const num = parseInt(match[1], 10);
+  const expected = repState.currentCount + 1;
+  const userId = d.author.id;
+
+  // 1. Check double-counting
+  if (repState.currentCount > 0 && userId === repState.lastUserId) {
+    try {
+      await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%E2%9D%8C/@me`, {
+        method: "PUT",
+        headers: { Authorization: `Bot ${TOKEN}` }
+      });
+      await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
+        embeds: [
+          {
+            title: "🚨 FORM BREAK // DOUBLE SET FOUL!",
+            description: `>>> <@${userId}> tried to count twice in a row at **${repState.currentCount} reps**!\n\nForm is completely broken. Barbell has been reset back to **1**! Grab your chalk and pick it back up lifters! 🍼`,
+            color: 0xE74C3C,
+            footer: { text: "Chic Gang Barbell Form Checker" },
+            timestamp: new Date().toISOString()
+          }
+        ]
+      });
+    } catch (e) {}
+    repState.currentCount = 0;
+    repState.lastUserId = null;
+    saveRepState();
+    return;
+  }
+
+  // 2. Check wrong number
+  if (num !== expected) {
+    try {
+      await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%E2%9D%8C/@me`, {
+        method: "PUT",
+        headers: { Authorization: `Bot ${TOKEN}` }
+      });
+      await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
+        embeds: [
+          {
+            title: "🚨 FORM BREAK // MISSED REP!",
+            description: `>>> <@${userId}> counted **${num}**, but the barbell needed **${expected}**!\n\nThe set was ruined at **${repState.currentCount} reps**. Count reset to **1**! Lock in lifters! 🍼`,
+            color: 0xE74C3C,
+            footer: { text: "Chic Gang Barbell Form Checker" },
+            timestamp: new Date().toISOString()
+          }
+        ]
+      });
+    } catch (e) {}
+    repState.currentCount = 0;
+    repState.lastUserId = null;
+    saveRepState();
+    return;
+  }
+
+  // 3. Clean Rep!
+  repState.currentCount = num;
+  repState.lastUserId = userId;
+  saveRepState();
+
+  try {
+    await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%F0%9F%8F%8B%EF%B8%8F/@me`, {
+      method: "PUT",
+      headers: { Authorization: `Bot ${TOKEN}` }
+    });
+  } catch (e) {}
+
+  // Milestones
+  const milestones = [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+  if (milestones.includes(num)) {
+    try {
+      await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
+        embeds: [
+          {
+            title: `🏆 BARBELL MILESTONE // ${num.toLocaleString()} REPS LOCKED!`,
+            description: `>>> **HEAVY WORKING SET MILESTONE ACHIEVED!**\n<@${userId}> just racked Rep **#${num.toLocaleString()}** on the community barbell!\n\nKeep rhythm, maintain strict form, and push to the next milestone! 🏋️‍♂️⚡🔥`,
+            color: 0xF1C40F,
+            footer: { text: "Chic Gang Strength Milestone" },
+            timestamp: new Date().toISOString()
+          }
+        ]
+      });
+    } catch (e) {}
+  }
 }
 
 // -------------------------------------------------------------
@@ -983,7 +1104,7 @@ function connectGateway() {
           op: 2,
           d: {
             token: TOKEN,
-            intents: 1 | 128 | 512,
+            intents: 1 | 128 | 512 | 1024,
             properties: { os: "linux", browser: "chic-cloud", device: "chic-cloud" }
           }
         }));
@@ -1039,6 +1160,9 @@ function connectGateway() {
             }
             d.content = content;
             await handleChatKeywords(d);
+            if (d.channel_id === REP_COUNTER_CH) {
+              await handleRepCounterMessage(d);
+            }
           }
         }
       }
