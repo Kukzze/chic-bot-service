@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: chic-bot-service
+    runtime: docker
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: DISCORD_TOKEN
+        sync: false
