@@ -267,23 +267,50 @@ async function handleMessageXp(msg) {
       ? `\n\n🏆 **NEW PRESTIGE UNLOCKED:** <@&${unlockedRole.id}>\nWear your discipline with pride on the gym floor!`
       : ``;
 
-    await discordApi(`/channels/${WINS_CH}/messages`, "POST", {
-      content: `🎉 **LEVEL UP ALERT // <@${userId}> REACHED LEVEL ${newLevel}!** ⚡🔥`,
-      embeds: [
-        {
-          title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
-          description: `>>> Huge props to **${author.global_name || author.username}** (<@${userId}>) for hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
-          color: unlockedRole ? 0xF1C40F : 0x2ECC71,
-          thumbnail: {
-            url: author.avatar
-              ? `https://cdn.discordapp.com/avatars/${userId}/${author.avatar}.png?size=256`
-              : `https://cdn.discordapp.com/embed/avatars/0.png`
-          },
-          footer: { text: "Chic Gang Native Leveling Engine • 100% Free & Automated" },
-          timestamp: new Date().toISOString()
+    // Hidden personal level-up alert to avoid spamming the channel
+    try {
+      const dmChannel = await discordApi('/users/@me/channels', 'POST', { recipient_id: userId });
+      if (dmChannel && dmChannel.id) {
+        await discordApi(`/channels/${dmChannel.id}/messages`, 'POST', {
+          content: `🎉 **CHIC GANG LEVEL UP // LEVEL ${newLevel}!** ⚡🔥`,
+          embeds: [
+            {
+              title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
+              description: `>>> Huge props on hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
+              color: unlockedRole ? 0xF1C40F : 0x2ECC71,
+              footer: { text: "Chic Gang Native Leveling Engine • Private Level Alert" },
+              timestamp: new Date().toISOString()
+            }
+          ]
+        });
+      }
+    } catch (dmErr) {
+      // If DMs closed, post temporary alert in WINS_CH and auto-delete after 20 seconds
+      try {
+        const tempMsg = await discordApi(`/channels/${WINS_CH}/messages`, "POST", {
+          content: `🎉 **LEVEL UP ALERT // <@${userId}> REACHED LEVEL ${newLevel}!** ⚡🔥 *(Auto-cleaning in 20s)*`,
+          embeds: [
+            {
+              title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
+              description: `>>> Huge props to **${author.global_name || author.username}** (<@${userId}>) for hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
+              color: unlockedRole ? 0xF1C40F : 0x2ECC71,
+              thumbnail: {
+                url: author.avatar
+                  ? `https://cdn.discordapp.com/avatars/${userId}/${author.avatar}.png?size=256`
+                  : `https://cdn.discordapp.com/embed/avatars/0.png`
+              },
+              footer: { text: "Chic Gang Native Leveling Engine • 100% Free & Automated" },
+              timestamp: new Date().toISOString()
+            }
+          ]
+        });
+        if (tempMsg && tempMsg.id) {
+          setTimeout(() => {
+            discordApi(`/channels/${WINS_CH}/messages/${tempMsg.id}`, "DELETE").catch(() => {});
+          }, 20000);
         }
-      ]
-    }).catch(() => {});
+      } catch (e) {}
+    }
   }
 
   saveLevelsDb();
@@ -1103,6 +1130,72 @@ async function handleInteraction(interaction) {
               description: ">>> **The official server leadership & administration structure:**\n\n• **👑 Co-Founder / Founders** — Core server direction, product vision & engineering.\n• **🛡️ Moderators** — Community safety, form check moderation & respect enforcement.\n• **⚡ Verified Lifters** — Dedicated server athletes with verified status.\n\n*Reach out to any staff member via <#1562037195965993057> if you need assistance!*",
               color: 0xE74C3C,
               footer: { text: "Chic Gang Staff Desk" }
+            }
+          ]
+        }
+      });
+      return;
+    }
+
+    if (customId === "select_rules_section") {
+      const val = data.values?.[0];
+      let title = "📜 CHIC GANG // RULES SECTION";
+      let desc = "Standard gym code.";
+      let color = 0xE74C3C;
+
+      if (val === "rule_sec_1") {
+        title = "🔒 SECTION I // SERVER SECURITY & SAFETY";
+        desc = ">>> **1. No NSFW or Explicit Media:** Strictly prohibited in all public channels and avatars.\n**2. No Harassment, Slurs, or Doxxing:** Zero tolerance for personal attacks, threats, or releasing private info.\n**3. No Scamming or Malicious Links:** Unauthorized advertising, pirated software, or token grabbers lead to permanent bans.";
+      } else if (val === "rule_sec_2") {
+        title = "⚡ SECTION II // GYM FLOOR ETIQUETTE & LIFTING INTEGRITY";
+        desc = ">>> **1. Respect Form Critiques:** Constructive advice only. Zero ego lifting shaming.\n**2. No Dangerous Advice:** Do not prescribe unverified PED cycles, unsafe medical regimens, or extreme dehydration cuts.\n**3. Channel Routing:** Keep memes in <#1563245239727165601>, bot commands in <#1562037196918227003>, and training discussion in <#1562037196238757920>.";
+      } else if (val === "rule_sec_3") {
+        title = "🛡️ SECTION III // DISCIPLINARY LADDER";
+        desc = ">>> **Violation Severity Scale:**\n• **1st Offense:** Formal warning logged in server record.\n• **2nd Offense:** 24-Hour timeout from all text and voice channels.\n• **3rd Offense:** Temporary 7-day server suspension.\n• **Severe Offenses (Doxxing, Exploits, Hate Speech):** Immediate permanent IP ban.";
+      } else if (val === "rule_sec_report") {
+        title = "🎫 HOW TO REPORT A RULE VIOLATION";
+        desc = ">>> **Need Moderator Assistance?**\nClick the **🎫 Open Support Ticket** button below or head over to <#1562037195965993057> to open a confidential private thread with server staff.";
+        color = 0x3498DB;
+      }
+
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [
+            {
+              title,
+              description: desc,
+              color,
+              footer: { text: "Chic Gang Discipline Protocol • Private View" }
+            }
+          ]
+        }
+      });
+      return;
+    }
+
+    if (customId === "view_full_rules") {
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          flags: 64,
+          embeds: [
+            {
+              title: "🔒 SECTION I // SERVER SECURITY & SAFETY",
+              description: ">>> **1. Zero NSFW / Gore:** Immediate permanent ban.\n**2. No Doxxing or Harassment:** Respect lifters' privacy.\n**3. No Scams / Phishing:** Malicious links or unauthorized promo are blocked.",
+              color: 0xE74C3C
+            },
+            {
+              title: "⚡ SECTION II // GYM FLOOR ETIQUETTE",
+              description: ">>> **1. Lifting Respect:** Constructive critique only.\n**2. No Fake PRs:** Keep lifting metrics authentic.\n**3. Stay on designated channels.**",
+              color: 0xF1C40F
+            },
+            {
+              title: "🛡️ SECTION III // DISCIPLINARY LADDER",
+              description: ">>> **Warning ➔ 24h Mute ➔ 7d Ban ➔ Permanent IP Ban**\nFair, strict, and disciplined.",
+              color: 0x9B59B6,
+              footer: { text: "Chic Gang Full Rulebook • Private View" }
             }
           ]
         }
