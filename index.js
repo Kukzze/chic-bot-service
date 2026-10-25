@@ -1,6 +1,6 @@
 import fs from 'fs';
 import http from 'http';
-import { spawn, execFile } from 'node:child_process';
+import { spawn, execFile, execSync } from 'node:child_process';
 import WebSocket from 'ws';
 import ffmpegStatic from 'ffmpeg-static';
 import {
@@ -96,6 +96,41 @@ async function getYtDlpPath() {
 
   resolvedYtDlp = localBin;
   return resolvedYtDlp;
+}
+
+let resolvedFfmpeg = null;
+async function getFfmpegPath() {
+  if (resolvedFfmpeg && fs.existsSync(resolvedFfmpeg)) return resolvedFfmpeg;
+
+  if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+    resolvedFfmpeg = ffmpegStatic;
+    return resolvedFfmpeg;
+  }
+
+  const binName = process.platform === 'win32' ? 'ffmpeg.exe' : 'ffmpeg';
+  const localBin = `./${binName}`;
+  if (fs.existsSync(localBin)) {
+    resolvedFfmpeg = localBin;
+    return resolvedFfmpeg;
+  }
+
+  const installJs = './node_modules/ffmpeg-static/install.js';
+  if (fs.existsSync(installJs)) {
+    try {
+      log('[ffmpeg] Downloading ffmpeg binary via install.js...');
+      execSync(`node "${installJs}"`, { stdio: 'inherit' });
+      if (ffmpegStatic && fs.existsSync(ffmpegStatic)) {
+        resolvedFfmpeg = ffmpegStatic;
+        log(`[ffmpeg] Successfully installed ffmpeg at ${ffmpegStatic}`);
+        return resolvedFfmpeg;
+      }
+    } catch (e) {
+      log(`[ffmpeg install.js err] ${e.message}`);
+    }
+  }
+
+  resolvedFfmpeg = binName;
+  return resolvedFfmpeg;
 }
 
 process.on('uncaughtException', (err) => {
@@ -639,13 +674,15 @@ function initPlayer() {
 
 function resolveStreamUrl(ytdlpBin, query) {
   return new Promise((resolve) => {
+    const cleanQuery = (query || '').replace(/\s+audio$/i, '').trim();
+
     // 1. First attempt: YouTube with android/ios client and node JS runtime
     const ytArgs = [
       '--no-warnings',
       '--js-runtimes', 'node',
       '--extractor-args', 'youtube:player_client=android,ios,mweb',
       '-g',
-      `ytsearch1:${query}`,
+      `ytsearch1:${cleanQuery}`,
       '-f', 'ba/b'
     ];
 
@@ -655,16 +692,18 @@ function resolveStreamUrl(ytdlpBin, query) {
         return resolve({ url: ytUrl, source: 'YouTube' });
       }
 
-      // 2. Second attempt: SoundCloud (bypasses datacenter bot blocks 100%)
+      // 2. Second attempt: SoundCloud with DRM filter (bypasses datacenter bot blocks 100%)
       const scArgs = [
         '--no-warnings',
+        '--match-filter', '!is_drm',
         '-g',
-        `scsearch1:${query}`,
+        `scsearch3:${cleanQuery}`,
         '-f', 'ba/b'
       ];
 
       execFile(ytdlpBin, scArgs, { timeout: 15000 }, (scErr, scStdout) => {
-        const scUrl = scStdout ? scStdout.trim().split('\n').find(l => l.startsWith('http')) : null;
+        const lines = scStdout ? scStdout.trim().split('\n').filter(l => l.startsWith('http')) : [];
+        const scUrl = lines[0]?.trim();
         if (scUrl) {
           return resolve({ url: scUrl, source: 'SoundCloud' });
         }
@@ -686,7 +725,7 @@ async function playNextTrack() {
   }
 
   const ytdlpBin = await getYtDlpPath();
-  const ffmpegBin = ffmpegStatic || 'ffmpeg';
+  const ffmpegBin = await getFfmpegPath();
 
   const res = await resolveStreamUrl(ytdlpBin, t.query);
   if (!res.url) {
@@ -708,10 +747,17 @@ async function playNextTrack() {
       '-ar', '48000',
       '-ac', '2',
       'pipe:1'
-    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+    currentFfmpeg.stderr.on('data', (d) => {
+      const msg = d.toString();
+      if (msg.includes('Error') || msg.includes('Invalid')) {
+        log(`[FFmpeg Err] ${msg.trim()}`);
+      }
+    });
 
     currentFfmpeg.on('error', (ferr) => {
-      log(`[FFmpeg Err] ${ferr.message}`);
+      log(`[FFmpeg Spawn Err] ${ferr.message}`);
     });
 
     const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.Raw });
@@ -720,7 +766,7 @@ async function playNextTrack() {
       voiceConnection.subscribe(audioPlayer);
     }
   } catch (ferr) {
-    log(`[FFmpeg Spawn Err] ${ferr.message}`);
+    log(`[FFmpeg Catch Err] ${ferr.message}`);
     currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
     setTimeout(playNextTrack, 2500);
   }
