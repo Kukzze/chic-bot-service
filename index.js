@@ -687,17 +687,6 @@ function initDankMemerReminders() {
 // -------------------------------------------------------------
 // Interactive UI Handler (Sub-30ms Instant Response)
 // -------------------------------------------------------------
-function respondInteraction(id, token, data) {
-  return fetch(`https://discord.com/api/v10/interactions/${id}/${token}/callback`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bot ${TOKEN}`,
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data)
-  }).catch(e => log(`[Respond Interaction Err] ${e.message}`));
-}
-
 async function handleInteraction(interaction) {
   const { id, token, data, member, user: directUser, type, channel_id } = interaction;
   const user = member?.user || directUser;
