@@ -1,0 +1,14 @@
+name: Cloud Keep-Alive Sentinel
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Chic Bot Cloud Container
+        run: |
+          curl -s -f https://chic-bot-service.onrender.com || echo "Ping dispatched"
