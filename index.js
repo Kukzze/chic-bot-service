@@ -919,7 +919,7 @@ function connectGateway() {
       if (op === 0) {
         if (t === "READY") {
           log(`[Gateway] Bot READY as ${d.user.username}#${d.user.discriminator}!`);
-          startWorkoutRadio(gatewayWs);
+          // Workout Radio 24/7 is handled exclusively by dedicated cloud bot Jockie Music
         }
 
         if (t === "VOICE_SERVER_UPDATE") {
