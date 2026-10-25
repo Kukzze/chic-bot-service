@@ -1,0 +1,15 @@
+{
+  "name": "chic-bot-service",
+  "version": "1.0.0",
+  "description": "Chic Bot 24/7 Voice & Leveling Service",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@discordjs/voice": "^0.19.2",
+    "opusscript": "^0.0.8",
+    "prism-media": "^1.3.5"
+  }
+}
