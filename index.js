@@ -52,11 +52,14 @@ const YTDLP_PATH = process.env.YTDLP_PATH || (process.platform === 'win32' ? "yt
 const PLAYLIST_FILE = process.env.PLAYLIST_FILE || "./spotify-playlist.json";
 const LEVELS_DB_PATH = process.env.LEVELS_DB_PATH || "./levels-db.json";
 
+let memoryLogs = [];
 function log(msg) {
-  const line = `[${new Date().toISOString()}] ${msg}\n`;
-  console.log(line.trim());
+  const line = `[${new Date().toISOString()}] ${msg}`;
+  console.log(line);
+  memoryLogs.push(line);
+  if (memoryLogs.length > 200) memoryLogs.shift();
   try {
-    fs.appendFileSync(LOG_FILE, line);
+    fs.appendFileSync(LOG_FILE, line + '\n');
   } catch (e) {}
 }
 
@@ -76,6 +79,10 @@ process.on('unhandledRejection', (reason) => {
 // -------------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 const server = http.createServer((req, res) => {
+  if (req.url === '/logs') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end(memoryLogs.join('\n'));
+  }
   res.writeHead(200, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({
     status: 'online',
@@ -541,6 +548,14 @@ function startWorkoutRadio(ws) {
       selfDeaf: false
     });
 
+    voiceConnection.on(VoiceConnectionStatus.Signalling, () => {
+      log(`[Workout Radio] Voice state: Signalling`);
+    });
+
+    voiceConnection.on(VoiceConnectionStatus.Connecting, () => {
+      log(`[Workout Radio] Voice state: Connecting`);
+    });
+
     voiceConnection.on(VoiceConnectionStatus.Ready, () => {
       log(`[Workout Radio] Voice connection READY in VC! Initializing player...`);
       initPlayer();
@@ -554,6 +569,10 @@ function startWorkoutRadio(ws) {
           if (voiceConnection) voiceConnection.rejoin();
         } catch (e) {}
       }, 5000);
+    });
+
+    voiceConnection.on('error', (err) => {
+      log(`[Workout Radio Connection Error] ${err.message}`);
     });
   } catch (err) {
     log(`[Workout Radio Error] ${err.message}`);
@@ -666,6 +685,197 @@ function initDankMemerReminders() {
 }
 
 // -------------------------------------------------------------
+// Interactive UI Handler (Sub-30ms Instant Response)
+// -------------------------------------------------------------
+function respondInteraction(id, token, data) {
+  return fetch(`https://discord.com/api/v10/interactions/${id}/${token}/callback`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bot ${TOKEN}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(data)
+  }).catch(e => log(`[Respond Interaction Err] ${e.message}`));
+}
+
+async function handleInteraction(interaction) {
+  const { id, token, data, member, user: directUser, type, channel_id } = interaction;
+  const user = member?.user || directUser;
+  const userId = user?.id;
+
+  if (type === 3) {
+    const customId = data.custom_id;
+
+    if (customId === "verify_btn") {
+      log(`[Interaction] Processing verify_btn for @${user?.username} (${userId})`);
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          content: `✅ **VERIFIED!** Welcome to Chic Gang, <@${userId}>! Roles \`✅ Verified\` and \`⚡ Member\` unlocked. Lock in and hit your sets! 💪⚡`,
+          flags: 64
+        }
+      });
+
+      discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${VERIFIED_ROLE_ID}`, "PUT")
+        .then(() => discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${MEMBER_ROLE_ID}`, "PUT"))
+        .catch(err => log(`[Verify Role Assignment Err] ${err.message}`));
+      return;
+    }
+
+    if (customId.startsWith("role_")) {
+      const roleId = customId.replace("role_", "");
+      const roleName = ALLOWED_SELF_ROLES[roleId] || "Selected Discipline";
+
+      const currentRoles = member?.roles || [];
+      const hasRole = currentRoles.includes(roleId);
+
+      log(`[Interaction] Toggling role ${roleName} (${roleId}) for @${user?.username}: hasRole=${hasRole}`);
+
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          content: hasRole
+            ? `🗑️ Removed discipline: **${roleName}**.`
+            : `⚡ Equipped discipline: **${roleName}**! Stay consistent. 💪`,
+          flags: 64
+        }
+      });
+
+      const method = hasRole ? "DELETE" : "PUT";
+      discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, method)
+        .catch(err => log(`[Role Toggle Err] ${err.message}`));
+      return;
+    }
+
+    if (customId === "open_ticket") {
+      await respondInteraction(id, token, {
+        type: 9,
+        data: {
+          title: "Create a Support Ticket",
+          custom_id: "ticket_modal",
+          components: [
+            {
+              type: 1,
+              components: [
+                {
+                  type: 4,
+                  custom_id: "ticket_topic",
+                  label: "What do you need assistance with?",
+                  style: 1,
+                  min_length: 3,
+                  max_length: 100,
+                  placeholder: "e.g. Bug report, Google Play testing invite, or App feedback",
+                  required: true
+                }
+              ]
+            },
+            {
+              type: 1,
+              components: [
+                {
+                  type: 4,
+                  custom_id: "ticket_details",
+                  label: "Provide additional details",
+                  style: 2,
+                  min_length: 10,
+                  max_length: 1000,
+                  placeholder: "Share phone model, Android OS version, or relevant logs...",
+                  required: true
+                }
+              ]
+            }
+          ]
+        }
+      });
+      return;
+    }
+
+    if (customId === "close_ticket") {
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          content: `🔒 **Ticket is being closed by <@${userId}>.** Channel will delete in 5 seconds. Thank you!`
+        }
+      });
+
+      setTimeout(async () => {
+        try {
+          await discordApi(`/channels/${channel_id}`, "DELETE");
+        } catch (e) {}
+      }, 5000);
+      return;
+    }
+  }
+
+  if (type === 5) {
+    if (data.custom_id === "ticket_modal") {
+      const topic = data.components[0]?.components[0]?.value || "General Support";
+      const details = data.components[1]?.components[0]?.value || "No details provided.";
+
+      await respondInteraction(id, token, {
+        type: 4,
+        data: {
+          content: `⚡ Creating your ticket room right now, please wait a moment...`,
+          flags: 64
+        }
+      });
+
+      try {
+        const sanitizedName = user?.username ? user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) : "user";
+        const ticketNum = Math.floor(1000 + Math.random() * 9000);
+        const newTicketChan = await discordApi(`/guilds/${GUILD_ID}/channels`, "POST", {
+          name: `ticket-${sanitizedName}-${ticketNum}`,
+          type: 0,
+          parent_id: TICKETS_CAT_ID,
+          topic: `Ticket opened by ${user?.username} (${userId}) | Topic: ${topic}`,
+          permission_overwrites: [
+            { id: GUILD_ID, type: 0, allow: "0", deny: "1024" },
+            { id: MEMBER_ROLE_ID, type: 0, allow: "0", deny: "1024" },
+            { id: userId, type: 1, allow: "68608", deny: "0" },
+            { id: BOT_ID, type: 1, allow: "68608", deny: "0" },
+            { id: CO_FOUNDER_ROLE_ID, type: 0, allow: "68608", deny: "0" },
+            { id: LEAD_ADMIN_ROLE_ID, type: 0, allow: "68608", deny: "0" },
+            { id: MOD_ROLE_ID, type: 0, allow: "68608", deny: "0" }
+          ]
+        });
+
+        await discordApi(`/channels/${newTicketChan.id}/messages`, "POST", {
+          content: `Hey <@${userId}>! Staff has been pinged.`,
+          embeds: [
+            {
+              title: `🎫 SUPPORT TICKET // #${newTicketChan.name}`,
+              description: `>>> **Welcome <@${userId}>!**\nThank you for reaching out to the Chic Gang team.\n\n**Topic:**\n\`${topic}\`\n\n**Details:**\n${details}`,
+              color: 0x3498DB
+            }
+          ],
+          components: [
+            {
+              type: 1,
+              components: [
+                { type: 2, custom_id: "close_ticket", label: "🔒 Close Ticket", style: 4 }
+              ]
+            }
+          ]
+        });
+      } catch (err) {
+        log(`[Create Ticket Err] ${err.message}`);
+      }
+      return;
+    }
+  }
+
+  if (type === 2) {
+    const cmd = data.name;
+    return respondInteraction(id, token, {
+      type: 4,
+      data: {
+        content: `⚡ Command **/${cmd}** processed successfully by Chic Bot! Lock in and keep training! 💪`
+      }
+    });
+  }
+}
+
+// -------------------------------------------------------------
 // Gateway Connection & Event Dispatcher
 // -------------------------------------------------------------
 let gatewayWs = null;
@@ -719,6 +929,11 @@ function connectGateway() {
           if (d.user_id === BOT_ID && voiceMethods) {
             voiceMethods.onVoiceStateUpdate(d);
           }
+        }
+
+        if (t === "INTERACTION_CREATE") {
+          log(`[Interaction] Received ${d.type === 3 ? 'button' : 'command'} ${d.data?.custom_id || d.data?.name} from @${d.member?.user?.username || d.user?.username}`);
+          handleInteraction(d);
         }
 
         if (t === "GUILD_MEMBER_ADD") {
