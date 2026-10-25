@@ -11,9 +11,6 @@ import {
 } from '@discordjs/voice';
 
 const TOKEN = process.env.DISCORD_TOKEN;
-if (!TOKEN) {
-  console.error("FATAL: DISCORD_TOKEN environment variable is not defined!");
-}
 const GUILD_ID = "1562037193961242644";
 const BOT_ID = "1562147527762124831";
 
@@ -908,7 +905,7 @@ function connectGateway() {
       if (op === 0) {
         if (t === "READY") {
           log(`[Gateway] Bot READY as ${d.user.username}#${d.user.discriminator}!`);
-          // Workout Radio 24/7 is handled exclusively by dedicated cloud bot Jockie Music
+          startWorkoutRadio(gatewayWs);
         }
 
         if (t === "VOICE_SERVER_UPDATE") {
