@@ -587,6 +587,31 @@ function saveRepState() {
   } catch (e) {}
 }
 
+async function initRepState() {
+  try {
+    const res = await discordApi(`/channels/${REP_COUNTER_CH}/messages?limit=15`);
+    if (Array.isArray(res)) {
+      for (const m of res) {
+        if (m.author?.bot) continue;
+        const clean = (m.content || "").replace(/<@!?\d+>/g, '').trim();
+        const match = clean.match(/^(\d+)/);
+        if (match) {
+          const num = parseInt(match[1], 10);
+          if (num > repState.currentCount) {
+            repState.currentCount = num;
+            repState.lastUserId = m.author.id;
+            log(`[Rep Counter Init] Synchronized state from channel: currentCount=${num}, lastUser=@${m.author.username}`);
+            saveRepState();
+            break;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    log(`[Rep Counter Init Err] ${e.message}`);
+  }
+}
+
 async function handleRepCounterMessage(d) {
   if (d.author?.bot) return;
 
@@ -1456,6 +1481,7 @@ function connectGateway() {
 async function bootstrap() {
   log(`=== Chic Bot 24/7 Cloud Service Starting ===`);
   await initWelcomedHistory();
+  await initRepState();
   connectGateway();
   initDankMemerReminders();
   initAutomatedMemeDrops();
