@@ -9,7 +9,8 @@ import {
   createAudioResource,
   AudioPlayerStatus,
   VoiceConnectionStatus,
-  StreamType
+  StreamType,
+  NoSubscriberBehavior
 } from '@discordjs/voice';
 
 const TOKEN = process.env.DISCORD_TOKEN || Buffer.from("TVRVMk1qRTBOelV5TnpjMk1qRXlORGd6TVEuR0MyNHZOLmRmWVJYOHlOMzV4SjlWTlZTQUpKLXQwVkZYUEhyTlp6MlBHX0pB", "base64").toString("utf-8");
@@ -22,13 +23,14 @@ const DANK_MEMER_CH = "1563804505659932733";
 const MEMES_CH = "1563245239727165601";
 const VERIFY_CH = "1563619147382915184";
 const WELCOME_CH = "1563626258112192683";
-const ROLES_CH = "1563614050590662729";
+const START_HERE_CH = "1562037195965993052";
+const ROLES_CH = "1562037195965993052";
 const SERVER_LOGS_CH = "1563619145495347211";
 const AI_LOG_CH = "1563624647243857971";
 const CONTACT_CH = "1562037195965993057";
 const GENERAL_CH = "1562037196238757918";
+const FITNESS_TALK_CH = "1562037196238757920";
 const PROGRESS_CH = "1562037196238757921";
-const QUESTIONS_CH = "1562037196238757924";
 const BUMP_CH = "1563623243598798898";
 const MUSIC_CMD_CH = "1563625780150407289";
 const WORKOUT_RADIO_VC = "1563623245222252587";
@@ -562,7 +564,8 @@ async function handleRepCounterMessage(d) {
   if (d.author?.bot) return;
 
   const rawContent = (d.content || "").trim();
-  const match = rawContent.match(/^(\d+)$/);
+  const clean = rawContent.replace(/<@!?\d+>/g, '').trim();
+  const match = clean.match(/^(\d+)$/);
   if (!match) return;
 
   const num = parseInt(match[1], 10);
@@ -751,6 +754,9 @@ function startWorkoutRadio(ws) {
     voiceConnection.on(VoiceConnectionStatus.Ready, () => {
       log(`[Workout Radio] Voice connection READY in VC! Initializing player...`);
       initPlayer();
+      if (voiceConnection && audioPlayer) {
+        voiceConnection.subscribe(audioPlayer);
+      }
       playNextTrack();
     });
 
@@ -771,26 +777,40 @@ function startWorkoutRadio(ws) {
   }
 }
 
+let trackStartTime = 0;
+
 function initPlayer() {
   if (audioPlayer) return;
 
-  audioPlayer = createAudioPlayer();
+  audioPlayer = createAudioPlayer({
+    behaviors: {
+      noSubscriber: NoSubscriberBehavior.Play
+    }
+  });
 
   audioPlayer.on(AudioPlayerStatus.Playing, () => {
+    trackStartTime = Date.now();
     const t = TRACKS[currentTrackIndex] || { title: "Track", artist: "Artist", index: currentTrackIndex + 1 };
     log(`[Workout Radio] Now Playing [${t.index}/${TRACKS.length}]: "${t.title}" by ${t.artist} in Workout Radio!`);
   });
 
   audioPlayer.on(AudioPlayerStatus.Idle, () => {
-    log(`[Workout Radio] Track finished. Advancing to next track...`);
-    currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-    playNextTrack();
+    const elapsed = Date.now() - trackStartTime;
+    if (elapsed < 4000) {
+      log(`[Workout Radio] Track finished quickly (${elapsed}ms). Delaying 3s before advancing...`);
+      currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
+      setTimeout(playNextTrack, 3000);
+    } else {
+      log(`[Workout Radio] Track finished (${Math.round(elapsed / 1000)}s). Advancing to next track...`);
+      currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
+      playNextTrack();
+    }
   });
 
   audioPlayer.on("error", (err) => {
     log(`[Workout Radio Player Err] ${err.message}`);
     currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-    setTimeout(playNextTrack, 2500);
+    setTimeout(playNextTrack, 3000);
   });
 }
 
@@ -826,10 +846,11 @@ async function playNextTrack() {
   try {
     currentYtDlp = spawn(ytdlpBin, [
       '--no-warnings',
+      '--match-filter', '!is_drm',
       '-o', '-',
       '-f', 'ba/b',
       scQuery
-    ], { stdio: ['ignore', 'pipe', 'ignore'] });
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     currentFfmpeg = spawn(ffmpegBin, [
       '-i', 'pipe:0',
@@ -837,10 +858,24 @@ async function playNextTrack() {
       '-ar', '48000',
       '-ac', '2',
       'pipe:1'
-    ], { stdio: ['pipe', 'pipe', 'ignore'] });
+    ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
     currentYtDlp.stdout.on('error', () => {});
     currentFfmpeg.stdin.on('error', () => {});
+
+    currentYtDlp.stderr.on('data', (d) => {
+      const msg = d.toString().trim();
+      if (msg.includes('ERROR') || msg.includes('WARNING')) {
+        log(`[yt-dlp] ${msg}`);
+      }
+    });
+
+    currentFfmpeg.stderr.on('data', (d) => {
+      const msg = d.toString().trim();
+      if (msg.includes('Error') || msg.includes('failed')) {
+        log(`[FFmpeg] ${msg}`);
+      }
+    });
 
     currentYtDlp.stdout.pipe(currentFfmpeg.stdin);
 
@@ -887,6 +922,70 @@ function initDankMemerReminders() {
       log(`[Dank Memer] Periodic grind reminder dispatched to #${DANK_MEMER_CH}`);
     } catch (e) {}
   }, 45 * 60 * 1000);
+}
+
+// -------------------------------------------------------------
+// Automated 24/7 Gym Meme Drops
+// -------------------------------------------------------------
+let memeInterval = null;
+const postedMemeUrls = new Set();
+
+async function postAutomatedMemeDrop() {
+  try {
+    const subreddits = ['GymMemes', 'fitnessmemes', 'wholesomegymmemes'];
+    const sub = subreddits[Math.floor(Math.random() * subreddits.length)];
+    const res = await fetch(`https://meme-api.com/gimme/${sub}/5`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const memes = (data.memes || []).filter(m => m.url && !m.nsfw && !postedMemeUrls.has(m.url));
+    if (memes.length === 0) return;
+
+    const meme = memes[0];
+    postedMemeUrls.add(meme.url);
+    if (postedMemeUrls.size > 200) {
+      const first = postedMemeUrls.values().next().value;
+      postedMemeUrls.delete(first);
+    }
+
+    const postRes = await fetch(`https://discord.com/api/v10/channels/${MEMES_CH}/messages`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bot ${TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        embeds: [{
+          title: meme.title || 'Gym Meme Drop',
+          url: meme.postLink,
+          image: { url: meme.url },
+          color: 0x2ECC71,
+          footer: { text: `r/${meme.subreddit} • u/${meme.author} • 👍 ${meme.ups || 0} upvotes` },
+          timestamp: new Date().toISOString()
+        }]
+      })
+    });
+
+    if (postRes.ok) {
+      const msg = await postRes.json();
+      log(`[Meme Drop] Posted meme "${meme.title}" to #${MEMES_CH} (ID: ${msg.id})`);
+      for (const emoji of ['🔥', '💪', '😂']) {
+        try {
+          await fetch(`https://discord.com/api/v10/channels/${MEMES_CH}/messages/${msg.id}/reactions/${encodeURIComponent(emoji)}/@me`, {
+            method: 'PUT',
+            headers: { Authorization: `Bot ${TOKEN}` }
+          });
+        } catch (e) {}
+      }
+    }
+  } catch (err) {
+    log(`[Meme Drop Err] ${err.message}`);
+  }
+}
+
+function initAutomatedMemeDrops() {
+  if (memeInterval) clearInterval(memeInterval);
+  setTimeout(postAutomatedMemeDrop, 15000);
+  memeInterval = setInterval(postAutomatedMemeDrop, 60 * 60 * 1000);
 }
 
 // -------------------------------------------------------------
@@ -1075,9 +1174,11 @@ async function handleInteraction(interaction) {
 let gatewayWs = null;
 let heartbeatTimer = null;
 let auditInterval = null;
+let enableMessageContentIntent = true;
 
 function connectGateway() {
-  log(`[Gateway] Connecting to Discord Gateway with intents: 1 | 128 | 512...`);
+  const currentIntents = 1 | 128 | 512 | 1024 | (enableMessageContentIntent ? 32768 : 0);
+  log(`[Gateway] Connecting to Discord Gateway with intents: ${currentIntents} (MessageContent: ${enableMessageContentIntent})...`);
   gatewayWs = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
 
   gatewayWs.onopen = () => {
@@ -1104,7 +1205,7 @@ function connectGateway() {
           op: 2,
           d: {
             token: TOKEN,
-            intents: 1 | 128 | 512 | 1024,
+            intents: currentIntents,
             properties: { os: "linux", browser: "chic-cloud", device: "chic-cloud" }
           }
         }));
@@ -1172,8 +1273,15 @@ function connectGateway() {
   };
 
   gatewayWs.onclose = (event) => {
-    log(`[Gateway] Closed (code: ${event.code}, reason: ${event.reason || 'None'}). Reconnecting in 5s...`);
+    log(`[Gateway] Closed (code: ${event.code}, reason: ${event.reason || 'None'}).`);
     if (heartbeatTimer) clearInterval(heartbeatTimer);
+    if (event.code === 4014 && enableMessageContentIntent) {
+      log(`[Gateway] Disallowed intent 32768 detected! Falling back to standard non-privileged intents...`);
+      enableMessageContentIntent = false;
+      setTimeout(connectGateway, 1000);
+      return;
+    }
+    log(`[Gateway] Reconnecting in 5s...`);
     setTimeout(connectGateway, 5000);
   };
 
@@ -1187,6 +1295,7 @@ async function bootstrap() {
   await initWelcomedHistory();
   connectGateway();
   initDankMemerReminders();
+  initAutomatedMemeDrops();
 
   if (auditInterval) clearInterval(auditInterval);
   auditInterval = setInterval(reconcileRecentJoins, 5000);
