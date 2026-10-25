@@ -746,6 +746,39 @@ function generateChatResponse(msg) {
     return `Chic Builder is built for serious lifters: **909+ offline exercises**, zero ads, local logging, and clean progressive overload tracking. 📱⚡`;
   }
 
+  // Glutes / Ass / Hips
+  if (/\b(glute|glutes|ass|butt|hip thrust)\b/i.test(lower)) {
+    return hinglish
+      ? `Hip thrusts lagana shuru kar bro! Solid glutes nahi honge toh heavy deadlift me lower back snap ho jayegi. Form strict rakh! 🍑🏋️‍♂️`
+      : `Hip thrusts are non-negotiable. Build glutes of steel so your lower back doesn't take the hit on heavy deadlifts! 🍑🏋️‍♂️`;
+  }
+
+  // Shhh / Silence
+  if (/\b(shh|shhh|shhhh|shhhhh|chup|quiet)\b/i.test(lower) || lower.includes("shhhhh")) {
+    return `🤫 *Shhh... locking in.* No talking on the platform, strictly iron moving. 🗿⚡`;
+  }
+
+  // Let's Go / Hype
+  if (/\b(lets goo|let's go|lets go|chalo|shuru)\b/i.test(lower)) {
+    return hinglish
+      ? `⚡ **LETS GOOOO!** Barbell pe chalk laga aur set attack kar! Pure power! 🔥`
+      : `⚡ **LETS GOOOO!** Rerack the weight, lock the collar, and own this set! 🔥`;
+  }
+
+  // Arms / Biceps
+  if (/\b(bicep|biceps|arms|tricep|triceps|curl|curls)\b/i.test(lower)) {
+    return hinglish
+      ? `Bicep curls squat rack me mat lagana bas! Baaki incline dumbbell curl aur skull crushers se arms explode ho jayenge! 💪`
+      : `Curls for the girls! Just don't curl in the squat rack unless you want the whole gym giving you the side-eye. 💪`;
+  }
+
+  // Abs / Core
+  if (/\b(abs|six pack|core|belly)\b/i.test(lower)) {
+    return hinglish
+      ? `Abs gym me bante hain aur kitchen me dikhte hain. Deficit maintain kar aur hanging leg raises lagana shuru kar! 🥗`
+      : `Abs are forged in the gym and revealed in the kitchen. Dial in that caloric deficit and hit your hanging leg raises! 🥗`;
+  }
+
   // Greetings
   if (/\b(hi|hello|hey|yo|sup|wassup|kya haal|kaisa hai|namaste)\b/i.test(lower)) {
     return hinglish
@@ -1178,16 +1211,24 @@ async function playNextTrack() {
     currentYtDlp = spawn(ytdlpBin, [
       '--no-warnings',
       '--match-filter', '!is_drm',
+      '--buffer-size', '64K',
       '-o', '-',
       '-f', 'ba/b',
       scQuery
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     currentFfmpeg = spawn(ffmpegBin, [
+      '-analyzeduration', '0',
+      '-probesize', '32k',
       '-i', 'pipe:0',
-      '-f', 's16le',
+      '-af', 'volume=0.85,alimiter=limit=0.95',
+      '-c:a', 'libopus',
+      '-b:a', '128k',
+      '-vbr', 'on',
+      '-compression_level', '10',
       '-ar', '48000',
       '-ac', '2',
+      '-f', 'ogg',
       'pipe:1'
     ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -1218,7 +1259,7 @@ async function playNextTrack() {
       log(`[FFmpeg Err] ${ferr.message}`);
     });
 
-    const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.Raw });
+    const resource = createAudioResource(currentFfmpeg.stdout, { inputType: StreamType.OggOpus });
     audioPlayer.play(resource);
     if (voiceConnection) {
       voiceConnection.subscribe(audioPlayer);
