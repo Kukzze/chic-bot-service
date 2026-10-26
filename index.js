@@ -1711,125 +1711,230 @@ async function handleInteraction(interaction) {
 }
 
 // -------------------------------------------------------------
-// Gateway Connection & Event Dispatcher
+// Gateway Connection & Event Dispatcher (Production Resume Engine)
 // -------------------------------------------------------------
 let gatewayWs = null;
 let heartbeatTimer = null;
+let lastHeartbeatAck = true;
+let lastSequence = null;
+let sessionId = null;
+let resumeGatewayUrl = null;
+let reconnectAttempts = 0;
+let isReconnecting = false;
 let auditInterval = null;
 let enableMessageContentIntent = true;
 
-function connectGateway() {
-  const currentIntents = 1 | 128 | 512 | 1024 | (enableMessageContentIntent ? 32768 : 0);
-  log(`[Gateway] Connecting to Discord Gateway with intents: ${currentIntents} (MessageContent: ${enableMessageContentIntent})...`);
-  gatewayWs = new WebSocket("wss://gateway.discord.gg/?v=10&encoding=json");
-
-  gatewayWs.onopen = () => {
-    log("[Gateway] WebSocket Open.");
-  };
-
-  gatewayWs.onmessage = async (event) => {
-    try {
-      const payload = JSON.parse(event.data);
-      const { op, d, s, t } = payload;
-
-      if (op === 10) {
-        const interval = d.heartbeat_interval;
-        log(`[Gateway] Received Hello. Heartbeat: ${interval}ms`);
-
-        if (heartbeatTimer) clearInterval(heartbeatTimer);
-        heartbeatTimer = setInterval(() => {
-          if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) {
-            gatewayWs.send(JSON.stringify({ op: 1, d: s }));
-          }
-        }, interval);
-
-        gatewayWs.send(JSON.stringify({
-          op: 2,
-          d: {
-            token: TOKEN,
-            intents: currentIntents,
-            properties: { os: "linux", browser: "chic-cloud", device: "chic-cloud" }
-          }
-        }));
-      }
-
-      if (op === 0) {
-        if (t === "READY") {
-          log(`[Gateway] Bot READY as ${d.user.username}#${d.user.discriminator}!`);
-          startWorkoutRadio();
-        }
-
-        if (t === "VOICE_SERVER_UPDATE") {
-          if (voiceMethods) voiceMethods.onVoiceServerUpdate(d);
-        }
-        if (t === "VOICE_STATE_UPDATE") {
-          if (d.user_id === BOT_ID && voiceMethods) {
-            voiceMethods.onVoiceStateUpdate(d);
-          }
-        }
-
-        if (t === "INTERACTION_CREATE") {
-          log(`[Interaction] Received ${d.type === 3 ? 'button' : 'command'} ${d.data?.custom_id || d.data?.name} from @${d.member?.user?.username || d.user?.username}`);
-          handleInteraction(d);
-        }
-
-        if (t === "GUILD_MEMBER_ADD") {
-          if (d.user) {
-            log(`[Gateway] GUILD_MEMBER_ADD event received for @${d.user.username}`);
-            sendMemberWelcome(d.user);
-          }
-        }
-
-        if (t === "MESSAGE_CREATE") {
-          if (d.author?.id === "302050872383242240") {
-            handleDisboardMessage(d);
-          }
-
-          if (d.type === 7 && d.author) {
-            log(`[System Join] Detected Type 7 join message for @${d.author.username}`);
-            sendMemberWelcome(d.author);
-            return;
-          }
-
-          if (d.author && !d.author.bot) {
-            await handleMessageXp(d);
-
-            let content = d.content;
-            if (!content || content.trim().length === 0) {
-              try {
-                const fresh = await discordApi(`/channels/${d.channel_id}/messages/${d.id}`);
-                content = fresh.content;
-              } catch (e) {}
-            }
-            d.content = content;
-            await handleChatKeywords(d);
-            if (d.channel_id === REP_COUNTER_CH) {
-              await handleRepCounterMessage(d);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      log(`[Gateway Message Err] ${err.message}`);
-    }
-  };
-
-  gatewayWs.onclose = (event) => {
-    log(`[Gateway] Closed (code: ${event.code}, reason: ${event.reason || 'None'}).`);
-    if (heartbeatTimer) clearInterval(heartbeatTimer);
-    if (event.code === 4014 && enableMessageContentIntent) {
-      log(`[Gateway] Disallowed intent 32768 detected! Falling back to standard non-privileged intents...`);
-      enableMessageContentIntent = false;
-      setTimeout(connectGateway, 1000);
+function sendHeartbeat() {
+  if (gatewayWs && gatewayWs.readyState === WebSocket.OPEN) {
+    if (!lastHeartbeatAck) {
+      log(`[Gateway] Heartbeat ACK not received before next heartbeat! Connection is dead. Terminating socket...`);
+      try { gatewayWs.terminate(); } catch (e) { gatewayWs.close(4000); }
       return;
     }
-    log(`[Gateway] Reconnecting in 5s...`);
-    setTimeout(connectGateway, 5000);
-  };
+    lastHeartbeatAck = false;
+    gatewayWs.send(JSON.stringify({ op: 1, d: lastSequence }));
+  }
+}
 
-  gatewayWs.onerror = (err) => {
-    log(`[Gateway Error] ${err.message}`);
-  };
+function connectGateway() {
+  if (isReconnecting) return;
+  isReconnecting = true;
+
+  const currentIntents = 1 | 128 | 512 | 1024 | (enableMessageContentIntent ? 32768 : 0);
+  const targetUrl = resumeGatewayUrl || "wss://gateway.discord.gg/?v=10&encoding=json";
+
+  log(`[Gateway] Connecting to ${targetUrl.split('?')[0]} (Intents: ${currentIntents}, Resuming: ${Boolean(sessionId && lastSequence !== null)})...`);
+
+  try {
+    if (gatewayWs) {
+      try { gatewayWs.removeAllListeners(); gatewayWs.terminate(); } catch (e) {}
+    }
+
+    gatewayWs = new WebSocket(targetUrl);
+    isReconnecting = false;
+
+    gatewayWs.onopen = () => {
+      log("[Gateway] WebSocket Open.");
+      lastHeartbeatAck = true;
+    };
+
+    gatewayWs.onmessage = async (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        const { op, d, s, t } = payload;
+
+        if (s !== null && s !== undefined) {
+          lastSequence = s;
+        }
+
+        // Opcode 10: Hello
+        if (op === 10) {
+          const interval = d.heartbeat_interval;
+          log(`[Gateway] Received Hello. Heartbeat: ${interval}ms`);
+
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          lastHeartbeatAck = true;
+          heartbeatTimer = setInterval(sendHeartbeat, interval);
+
+          // If we have an existing session, send Opcode 6 (RESUME)
+          if (sessionId && lastSequence !== null) {
+            log(`[Gateway] Attempting to RESUME session ${sessionId} at sequence ${lastSequence}...`);
+            gatewayWs.send(JSON.stringify({
+              op: 6,
+              d: {
+                token: TOKEN,
+                session_id: sessionId,
+                seq: lastSequence
+              }
+            }));
+          } else {
+            // Fresh IDENTIFY (Opcode 2)
+            log(`[Gateway] Sending fresh IDENTIFY (Opcode 2)...`);
+            gatewayWs.send(JSON.stringify({
+              op: 2,
+              d: {
+                token: TOKEN,
+                intents: currentIntents,
+                properties: { os: "linux", browser: "chic-cloud", device: "chic-cloud" }
+              }
+            }));
+          }
+        }
+
+        // Opcode 11: Heartbeat ACK
+        if (op === 11) {
+          lastHeartbeatAck = true;
+        }
+
+        // Opcode 1: Heartbeat requested
+        if (op === 1) {
+          sendHeartbeat();
+        }
+
+        // Opcode 7: Reconnect
+        if (op === 7) {
+          log(`[Gateway] Received Opcode 7 (Reconnect requested by Discord). Closing socket to resume...`);
+          gatewayWs.close(4000);
+        }
+
+        // Opcode 9: Invalid Session
+        if (op === 9) {
+          const resumable = Boolean(d);
+          log(`[Gateway] Received Opcode 9 (Invalid Session, resumable: ${resumable}).`);
+          if (!resumable) {
+            sessionId = null;
+            lastSequence = null;
+            resumeGatewayUrl = null;
+          }
+          gatewayWs.close(4000);
+        }
+
+        // Opcode 0: Dispatch
+        if (op === 0) {
+          if (t === "READY") {
+            sessionId = d.session_id;
+            resumeGatewayUrl = d.resume_gateway_url;
+            reconnectAttempts = 0;
+            log(`[Gateway] Bot READY as ${d.user.username}#${d.user.discriminator} (Session: ${sessionId})!`);
+            startWorkoutRadio();
+          }
+
+          if (t === "RESUMED") {
+            reconnectAttempts = 0;
+            log(`[Gateway] Session RESUMED successfully! Zero IDENTIFY budget consumed.`);
+            startWorkoutRadio();
+          }
+
+          if (t === "VOICE_SERVER_UPDATE") {
+            if (voiceMethods) voiceMethods.onVoiceServerUpdate(d);
+          }
+          if (t === "VOICE_STATE_UPDATE") {
+            if (d.user_id === BOT_ID && voiceMethods) {
+              voiceMethods.onVoiceStateUpdate(d);
+            }
+          }
+
+          if (t === "INTERACTION_CREATE") {
+            log(`[Interaction] Received ${d.type === 3 ? 'button' : 'command'} ${d.data?.custom_id || d.data?.name} from @${d.member?.user?.username || d.user?.username}`);
+            handleInteraction(d);
+          }
+
+          if (t === "GUILD_MEMBER_ADD") {
+            if (d.user) {
+              log(`[Gateway] GUILD_MEMBER_ADD event received for @${d.user.username}`);
+              sendMemberWelcome(d.user);
+            }
+          }
+
+          if (t === "MESSAGE_CREATE") {
+            if (d.author?.id === "302050872383242240") {
+              handleDisboardMessage(d);
+            }
+
+            if (d.type === 7 && d.author) {
+              log(`[System Join] Detected Type 7 join message for @${d.author.username}`);
+              sendMemberWelcome(d.author);
+              return;
+            }
+
+            if (d.author && !d.author.bot) {
+              await handleMessageXp(d);
+
+              let content = d.content;
+              if (!content || content.trim().length === 0) {
+                try {
+                  const fresh = await discordApi(`/channels/${d.channel_id}/messages/${d.id}`);
+                  content = fresh.content;
+                } catch (e) {}
+              }
+              d.content = content;
+              await handleChatKeywords(d);
+              if (d.channel_id === REP_COUNTER_CH) {
+                await handleRepCounterMessage(d);
+              }
+            }
+          }
+        }
+      } catch (err) {
+        log(`[Gateway Message Err] ${err.message}`);
+      }
+    };
+
+    gatewayWs.onclose = (event) => {
+      isReconnecting = false;
+      log(`[Gateway] Closed (code: ${event.code}, reason: ${event.reason || 'None'}).`);
+      if (heartbeatTimer) clearInterval(heartbeatTimer);
+
+      // Code 4004: Authentication failed
+      if (event.code === 4004) {
+        log(`[FATAL] Gateway 4004: Authentication failed! The Discord bot token is invalid or has been reset. Stopping reconnect loop.`);
+        return;
+      }
+
+      // Code 4014: Disallowed intents
+      if (event.code === 4014 && enableMessageContentIntent) {
+        log(`[Gateway] Disallowed intent 32768 detected! Falling back to non-privileged intents...`);
+        enableMessageContentIntent = false;
+        setTimeout(connectGateway, 1000);
+        return;
+      }
+
+      // Exponential backoff
+      const delay = Math.min(5000 * Math.pow(1.4, reconnectAttempts), 45000);
+      reconnectAttempts++;
+      log(`[Gateway] Reconnecting in ${Math.round(delay / 1000)}s (Attempt #${reconnectAttempts})...`);
+      setTimeout(connectGateway, delay);
+    };
+
+    gatewayWs.onerror = (err) => {
+      isReconnecting = false;
+      log(`[Gateway Error] ${err.message}`);
+    };
+  } catch (e) {
+    isReconnecting = false;
+    log(`[Gateway Exception] ${e.message}`);
+    setTimeout(connectGateway, 5000);
+  }
 }
 
 async function bootstrap() {
