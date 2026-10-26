@@ -57,6 +57,7 @@ const PLAYLIST_FILE = process.env.PLAYLIST_FILE || "./spotify-playlist.json";
 const LEVELS_DB_PATH = process.env.LEVELS_DB_PATH || "./levels-db.json";
 
 let memoryLogs = [];
+let logCounter = 0;
 function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
@@ -64,6 +65,13 @@ function log(msg) {
   if (memoryLogs.length > 200) memoryLogs.shift();
   try {
     fs.appendFileSync(LOG_FILE, line + '\n');
+    logCounter++;
+    if (logCounter % 50 === 0) {
+      if (fs.existsSync(LOG_FILE) && fs.statSync(LOG_FILE).size > 2 * 1024 * 1024) {
+        const lines = fs.readFileSync(LOG_FILE, 'utf8').split('\n');
+        fs.writeFileSync(LOG_FILE, lines.slice(-400).join('\n') + '\n', 'utf8');
+      }
+    }
   } catch (e) {}
 }
 
@@ -1174,6 +1182,28 @@ setInterval(() => {
 
 let trackStartTime = 0;
 
+function updateBotPresence(title, artist) {
+  if (!gatewayWs || gatewayWs.readyState !== WebSocket.OPEN) return;
+  try {
+    const songName = title ? `${title} • ${artist}`.slice(0, 100) : "24/7 Workout Radio";
+    gatewayWs.send(JSON.stringify({
+      op: 3,
+      d: {
+        since: null,
+        activities: [
+          {
+            name: songName,
+            type: 2, // Listening to
+            state: "⚡ Chic Gang • 24/7 Gym Radio"
+          }
+        ],
+        status: "online",
+        afk: false
+      }
+    }));
+  } catch (e) {}
+}
+
 function initPlayer() {
   if (audioPlayer) return;
 
@@ -1187,15 +1217,25 @@ function initPlayer() {
     trackStartTime = Date.now();
     const t = TRACKS[currentTrackIndex] || { title: "Track", artist: "Artist", index: currentTrackIndex + 1 };
     log(`[Workout Radio] Now Playing [${t.index}/${TRACKS.length}]: "${t.title}" by ${t.artist} in Workout Radio!`);
+    updateBotPresence(t.title, t.artist);
   });
 
   audioPlayer.on(AudioPlayerStatus.Idle, () => {
     const elapsed = Date.now() - trackStartTime;
+    const t = TRACKS[currentTrackIndex];
     if (elapsed < 4000) {
-      log(`[Workout Radio] Track finished quickly (${elapsed}ms). Delaying 3s before advancing...`);
+      if (t && !t.useYtFallback) {
+        log(`[Workout Radio] Track finished quickly (${elapsed}ms). Retrying with YouTube Audio fallback in 2s...`);
+        t.useYtFallback = true;
+        setTimeout(playNextTrack, 2000);
+        return;
+      }
+      log(`[Workout Radio] Track failed on both engines (${elapsed}ms). Advancing to next track...`);
+      if (t) t.useYtFallback = false;
       currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
-      setTimeout(playNextTrack, 3000);
+      setTimeout(playNextTrack, 2500);
     } else {
+      if (t) t.useYtFallback = false;
       log(`[Workout Radio] Track finished (${Math.round(elapsed / 1000)}s). Advancing to next track...`);
       currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
       playNextTrack();
@@ -1204,6 +1244,13 @@ function initPlayer() {
 
   audioPlayer.on("error", (err) => {
     log(`[Workout Radio Player Err] ${err.message}`);
+    const t = TRACKS[currentTrackIndex];
+    if (t && !t.useYtFallback) {
+      t.useYtFallback = true;
+      setTimeout(playNextTrack, 2000);
+      return;
+    }
+    if (t) t.useYtFallback = false;
     currentTrackIndex = (currentTrackIndex + 1) % TRACKS.length;
     setTimeout(playNextTrack, 3000);
   });
@@ -1234,9 +1281,11 @@ async function playNextTrack() {
     .replace(/\s*-\s*Remix/i, '')
     .trim();
   const cleanArtist = (t.artist || '').split(',')[0].trim();
-  const scQuery = `scsearch1:${cleanTitle} ${cleanArtist}`;
+  const query = t.useYtFallback
+    ? `ytsearch1:${cleanTitle} ${cleanArtist} audio`
+    : `scsearch1:${cleanTitle} ${cleanArtist}`;
 
-  log(`[Workout Radio] Streaming "${t.title}" directly via yt-dlp pipe...`);
+  log(`[Workout Radio] Streaming "${t.title}" via ${t.useYtFallback ? 'YouTube Audio' : 'SoundCloud'} pipe...`);
 
   try {
     currentYtDlp = spawn(ytdlpBin, [
@@ -1245,7 +1294,7 @@ async function playNextTrack() {
       '--buffer-size', '64K',
       '-o', '-',
       '-f', 'ba/b',
-      scQuery
+      query
     ], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     currentFfmpeg = spawn(ffmpegBin, [
