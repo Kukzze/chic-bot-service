@@ -13,7 +13,7 @@ import {
   NoSubscriberBehavior
 } from '@discordjs/voice';
 
-const TOKEN = process.env.DISCORD_TOKEN || Buffer.from("TVRVMk1qRTBOelV5TnpjMk1qRXlORGd6TVEuR0MyNHZOLmRmWVJYOHlOMzV4SjlWTlZTQUpKLXQwVkZYUEhyTlp6MlBHX0pB", "base64").toString("utf-8");
+const TOKEN = process.env.DISCORD_TOKEN || Buffer.from("TVRVMk1qRTBOelV5TnpjMk1qRXlORGd6TVEuR1NzOHpxLkxBcUZSdDVIMTJETmNZaHlSS1pwRjhycmFNdU9IWEI2SXR2bHNV", "base64").toString("utf-8");
 const GUILD_ID = "1562037193961242644";
 const BOT_ID = "1562147527762124831";
 const WOLF_ID = "1042743525705523291";
