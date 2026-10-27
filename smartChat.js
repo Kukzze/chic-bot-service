@@ -1,5 +1,6 @@
 // -------------------------------------------------------------
 // Chic Bot // Smart Chat & Conversational Gym Spotter Engine
+// 100% Pure English Edition
 // -------------------------------------------------------------
 
 const BOT_ID = "1562147527762124831";
@@ -14,28 +15,12 @@ const REP_COUNTER_CH = "1563828990521647156";
 
 // Channel cooldown tracking to avoid spam loops
 const channelCooldowns = new Map();
-function canTriggerAmbient(channelId, cooldownMs = 12000) {
+function canTriggerAmbient(channelId, cooldownMs = 10000) {
   const now = Date.now();
   const last = channelCooldowns.get(channelId) || 0;
   if (now - last < cooldownMs) return false;
   channelCooldowns.set(channelId, now);
   return true;
-}
-
-// Check if message is Hindi/Hinglish
-function isHinglish(text) {
-  const hinglishWords = [
-    "bhai", "kya", "aaj", "kaun", "kaise", "kaisa", "bol", "bata", "kar", "kr", "krde", "karega",
-    "hai", "h", "ye", "wo", "ni", "nahi", "nhi", "mera", "meri", "chahiye", "chal", "mat",
-    "suno", "sun", "yaar", "gym", "pel", "dekh", "theek", "thik", "shuru", "karo", "khatam",
-    "lagana", "laga", "uthana", "utha", "samosa", "khana", "khaya", "bhookh", "neend", "aayein"
-  ];
-  const lower = text.toLowerCase();
-  let count = 0;
-  for (const w of hinglishWords) {
-    if (new RegExp(`\\b${w}\\b`, 'i').test(lower)) count++;
-  }
-  return count >= 1;
 }
 
 // Quotes Bank
@@ -65,25 +50,20 @@ function pick(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-// Interactive Natural Chat Parser & Generator
+// Interactive Natural Chat Parser & Generator (100% English)
 export function generateChatResponse(msg) {
   const raw = (msg.content || "").trim();
   const lower = raw.toLowerCase();
   const authorId = msg.author?.id;
-  const username = msg.author?.username || "lifter";
   const isWolf = authorId === WOLF_ID;
   const isKukzze = authorId === KUKZZE_ID;
-  const hinglish = isHinglish(raw);
 
   // Command handlers (!spot, !formcheck, !roast, !quote, !hype, !split, !macros, !flip, !8ball, !help)
   if (lower.startsWith("!spot") || lower.includes("spot me")) {
-    if (hinglish) {
-      return `Barbell ke peeche khada hu bro. Hands firmly under the bar. Unrack kar... down to the chest... aur ab EXPLODE KAR! All you, pure power! 🏋️‍♂️💪`;
-    }
     return `Hands locked under the barbell. Unracked... down to the sternum... DRIVE THROUGH THE HEELS! It's all you, don't quit on the sticking point! 🏋️‍♂️🔥`;
   }
 
-  if (lower.startsWith("!roast") || lower.includes("roast me") || lower.includes("roast kr")) {
+  if (lower.startsWith("!roast") || lower.includes("roast me")) {
     return `💀 ${pick(ROASTS)}`;
   }
 
@@ -93,9 +73,6 @@ export function generateChatResponse(msg) {
   }
 
   if (lower.startsWith("!hype") || lower.includes("hype me up")) {
-    if (hinglish) {
-      return `⚡ **LOCK IN!** No excuses, no shortcuts! Pre-workout kick ho chuka hai, music max volume pe daal aur barbell pe jaa. Today we break limits! 🦾🔥`;
-    }
     return `⚡ **TIME TO RERACK THE WORLD!** Pre-workout surging, heart rate primed, zero room for hesitation. Get on the floor and own the iron! 🦾🔥`;
   }
 
@@ -121,8 +98,7 @@ export function generateChatResponse(msg) {
   }
 
   if (lower.startsWith("!flip") || lower.includes("flip a coin")) {
-    const result = Math.random() > 0.5 ? "🪙 **HEADS** — Extra set to failure!" : "🪙 **TAILS** — Drop set on the last exercise!";
-    return result;
+    return Math.random() > 0.5 ? "🪙 **HEADS** — Extra set to failure!" : "🪙 **TAILS** — Drop set on the last exercise!";
   }
 
   if (lower.startsWith("!8ball")) {
@@ -152,64 +128,71 @@ export function generateChatResponse(msg) {
 
   // Wolfie recognition (the_wolf.ie - clear, grounded, respectful, human-like)
   if (isWolf) {
-    if (lower.includes("kaam") || lower.includes("thik") || lower.includes("sahi") || lower.includes("changes") || lower.includes("update")) {
-      return `Done bhai. Sab kuch aligned hai. Changes monitor kar rha hu 24/7. Koi bhi instruction ho toh direct bol, execute kar dunga.`;
+    if (lower.includes("changes") || lower.includes("update") || lower.includes("task") || lower.includes("fix") || lower.includes("check")) {
+      return `Understood, wolf. Everything is verified and running clean. Standing by for any adjustments.`;
     }
-    if (hinglish) {
-      return `Haan wolf bhai, bolo kya scene hai? Barbell locked hai aur workout radio mast chal rha hai.`;
-    }
-    return `On it, wolf. Everything's running clean and stable. Let me know what you need adjusted.`;
+    return `On it, wolf. The bot is locked in, workout radio is streaming 24/7, and server operations are fully nominal.`;
   }
 
   // Kukzze recognition (dev banter)
   if (isKukzze) {
     if (lower.includes("bot") || lower.includes("dev") || lower.includes("code") || lower.includes("app")) {
-      return `Dev saab! Container 100% healthy chal rha hai cloud pe. Tu bas heavy sets laga aur code push kar! 💻⚡💪`;
+      return `Hey dev! Cloud container is operating at 100% health. Keep crushing those sets and pushing code! 💻⚡💪`;
     }
   }
 
   // PR / Heavy Lift Celebrations
   if (/\b(pr|pb|personal best|personal record|1rm|maxed out|hit 100|hit 120|hit 140|hit 160|hit 200|benched|deadlifted|squatted)\b/i.test(lower)) {
-    if (hinglish) {
-      return `Bawaal PR bro! 🔥 Lift authentic tha, momentum maintain rakh. Kal recovery pe dhyan dena aur hydration solid rakhna! <:cb_big_w:1563245281661690036>`;
-    }
     return `MASSIVE PR! 🔥 That bar moved with authority. Log that milestone in Chic Builder and keep chasing progressive overload! <:cb_big_w:1563245281661690036>`;
   }
 
   // Leg Day & Excuses
   if (/\b(leg day|legs|skip legs|skip leg day|squats|calves|wheels)\b/i.test(lower)) {
     if (lower.includes("skip")) {
-      return hinglish
-        ? `Leg day skip karega toh chicken legs leke ghoomega bro. Friends don't let friends skip wheel day. Chalk utha aur squat rack pe chal! 🍗❌`
-        : `Skipping leg day is an automatic penalty. You cannot build a fortress on toothpicks. Rerack and hit the squat rack! 🍗❌`;
+      return `Skipping leg day is an automatic penalty. You cannot build a fortress on toothpicks. Rerack and hit the squat rack! 🍗❌`;
     }
-    return hinglish
-      ? `Leg day locked in! Deep squats, quad tears aur Romanian deadlifts. Session ke baad stairs chadhna mushkil hona chahiye! 🏋️‍♂️`
-      : `Leg day on deck! Hit proper depth on squats, control the eccentric, and embrace the burn. Wheels under construction! 🏋️‍♂️`;
+    return `Leg day on deck! Hit proper depth on squats, control the eccentric, and embrace the burn. Wheels under construction! 🏋️‍♂️`;
   }
 
   // Diet & Nutrition
-  if (/\b(creatine|protein|whey|bulk|cut|calories|diet|chicken|samosa|biryani|carbs|cheat meal)\b/i.test(lower)) {
-    if (lower.includes("samosa") || lower.includes("cheat")) {
-      return hinglish
-        ? `Cheat meal theek hai bro, but ensure daily protein target (1.6-2g/kg) hit ho. Samosa se pump accha aayega, kal heavy press marna! 🥟💪`
-        : `Enjoy the cheat meal for the glycogen refill, but hit your protein first and put those extra calories to work on heavy compound lifts tomorrow! 💪`;
+  if (/\b(creatine|protein|whey|bulk|cut|calories|diet|chicken|carbs|cheat meal)\b/i.test(lower)) {
+    if (lower.includes("cheat")) {
+      return `Enjoy the cheat meal for glycogen replenishment, but hit your daily protein goal first and put those extra calories to work on heavy compound lifts tomorrow! 💪`;
     }
     if (lower.includes("creatine")) {
-      return hinglish
-        ? `5g creatine daily, bina kisi loading phase ke drama ke. Paani 3-4 litre roz peena mat bhoolna! 💧`
-        : `5g creatine monohydrate daily. No fancy loading phases needed. Just stay consistent and drink plenty of water! 💧`;
+      return `5g of creatine monohydrate daily. No fancy loading phase needed. Just stay consistent and drink plenty of water! 💧`;
     }
-    return hinglish
-      ? `Nutrition simple rakho: 2g protein per kg, clean carbs for energy, healthy fats for hormones. Consistency hi physique banati hai.`
-      : `Keep nutrition dialed in: 1.6-2.2g protein per kg, eat around your maintenance according to goals, and prioritize real food.`;
+    return `Keep nutrition dialed in: 1.6 to 2.2g of protein per kg of bodyweight, eat around maintenance according to your goals, and prioritize whole foods.`;
   }
 
   // Tired / Motivation
-  if (/\b(lazy|tired|thak gya|mood ni|don't feel like|no motivation|skip today|demotivated)\b/i.test(lower)) {
-    return hinglish
-      ? `Discipline > Motivation bhai. Jis din mann nahi karta, usi din gym jaana champion banata hai. Bag pack kar aur chal, half workout is 100x better than 0! 🔥`
-      : `Discipline beats motivation every day of the week. The iron doesn't care if you're tired. Show up, warm up, and let the pump take over! 🔥`;
+  if (/\b(lazy|tired|don't feel like|no motivation|skip today|demotivated)\b/i.test(lower)) {
+    return `Discipline beats motivation every day of the week. The iron doesn't care if you're tired. Show up, warm up, and let the pump take over! 🔥`;
+  }
+
+  // Glutes / Ass / Hips
+  if (/\b(glute|glutes|ass|butt|hip thrust)\b/i.test(lower)) {
+    return `Hip thrusts are non-negotiable. Build glutes of steel so your lower back doesn't take the hit on heavy deadlifts! 🍑🏋️‍♂️`;
+  }
+
+  // Shhh / Silence
+  if (/\b(shh|shhh|shhhh|shhhhh|quiet)\b/i.test(lower) || lower.includes("shhhhh")) {
+    return `🤫 *Shhh... locking in.* No talking on the platform, strictly iron moving. 🗿⚡`;
+  }
+
+  // Let's Go / Hype
+  if (/\b(lets goo|let's go|lets go)\b/i.test(lower)) {
+    return `⚡ **LETS GOOOO!** Rerack the weight, lock the collar, and own this set! 🔥`;
+  }
+
+  // Arms / Biceps
+  if (/\b(bicep|biceps|arms|tricep|triceps|curl|curls)\b/i.test(lower)) {
+    return `Curls for the girls! Just don't curl in the squat rack unless you want the whole gym giving you the side-eye. 💪`;
+  }
+
+  // Abs / Core
+  if (/\b(abs|six pack|core|belly)\b/i.test(lower)) {
+    return `Abs are forged in the gym and revealed in the kitchen. Dial in that caloric deficit and hit your hanging leg raises! 🥗`;
   }
 
   // Chic Builder App Mention
@@ -217,44 +200,9 @@ export function generateChatResponse(msg) {
     return `Chic Builder is built for serious lifters: **909+ offline exercises**, zero ads, local logging, and clean progressive overload tracking. 📱⚡`;
   }
 
-  // Glutes / Ass / Hips
-  if (/\b(glute|glutes|ass|butt|hip thrust)\b/i.test(lower)) {
-    return hinglish
-      ? `Hip thrusts lagana shuru kar bro! Solid glutes nahi honge toh heavy deadlift me lower back snap ho jayegi. Form strict rakh! 🍑🏋️‍♂️`
-      : `Hip thrusts are non-negotiable. Build glutes of steel so your lower back doesn't take the hit on heavy deadlifts! 🍑🏋️‍♂️`;
-  }
-
-  // Shhh / Silence
-  if (/\b(shh|shhh|shhhh|shhhhh|chup|quiet)\b/i.test(lower) || lower.includes("shhhhh")) {
-    return `🤫 *Shhh... locking in.* No talking on the platform, strictly iron moving. 🗿⚡`;
-  }
-
-  // Let's Go / Hype
-  if (/\b(lets goo|let's go|lets go|chalo|shuru)\b/i.test(lower)) {
-    return hinglish
-      ? `⚡ **LETS GOOOO!** Barbell pe chalk laga aur set attack kar! Pure power! 🔥`
-      : `⚡ **LETS GOOOO!** Rerack the weight, lock the collar, and own this set! 🔥`;
-  }
-
-  // Arms / Biceps
-  if (/\b(bicep|biceps|arms|tricep|triceps|curl|curls)\b/i.test(lower)) {
-    return hinglish
-      ? `Bicep curls squat rack me mat lagana bas! Baaki incline dumbbell curl aur skull crushers se arms explode ho jayenge! 💪`
-      : `Curls for the girls! Just don't curl in the squat rack unless you want the whole gym giving you the side-eye. 💪`;
-  }
-
-  // Abs / Core
-  if (/\b(abs|six pack|core|belly)\b/i.test(lower)) {
-    return hinglish
-      ? `Abs gym me bante hain aur kitchen me dikhte hain. Deficit maintain kar aur hanging leg raises lagana shuru kar! 🥗`
-      : `Abs are forged in the gym and revealed in the kitchen. Dial in that caloric deficit and hit your hanging leg raises! 🥗`;
-  }
-
   // Greetings
-  if (/\b(hi|hello|hey|yo|sup|wassup|kya haal|kaisa hai|namaste)\b/i.test(lower)) {
-    return hinglish
-      ? `Yo bro! Kya haal? Aaj kaunsa muscle group target ho rha hai gym me? 💪`
-      : `Yo! Ready to put in work today? What are we training? 🏋️‍♂️`;
+  if (/\b(hi|hello|hey|yo|sup|wassup)\b/i.test(lower)) {
+    return `Yo! Ready to put in work today? What are we training? 🏋️‍♂️`;
   }
 
   // Ronnie / CBum / Zyzz triggers
@@ -262,17 +210,7 @@ export function generateChatResponse(msg) {
     return `⚡ **"YEAAAH BUDDY! LIGHT WEIGHT BABY! AIN'T NOTHING TO IT BUT TO DO IT!"** — *Big Ron* 🏋️‍♂️💪🔥`;
   }
 
-  // If directly mentioned or replied to, give a fun, sharp, conversational gym response!
-  if (hinglish) {
-    const responses = [
-      `Suno bro, gym floor pe focus 100% hona chahiye! Koi doubt ho workout ya diet me toh pooch le, spotter on duty hai. 💪`,
-      `Bolo bhai! Set complete hua ya rest interval lamba chal rha hai? Barbell wait kar rha hai! ⚡`,
-      `Bilkul sahi bol rha hai. Form strict rakh aur progressive overload follow kar, gains guaranteed hain. 🏋️‍♂️`,
-      `Haan bhai sun rha hu! Aaj PR todna hai ya normal pump session hai? 🔥`
-    ];
-    return pick(responses);
-  }
-
+  // Conversational Fallback (English only)
   const enResponses = [
     `Spotter on duty! What's the play today—heavy compounds or hypertrophy volume? 💪`,
     `Heard you loud and clear. Keep the intensity high and don't rush through the eccentrics! 🏋️‍♂️`,
@@ -291,13 +229,11 @@ export async function handleSmartChat(msg, { botId, discordApi, reactEmoji, log 
   const content = (msg.content || "").trim();
   const lower = content.toLowerCase();
 
-  // Check if directly mentioned or replied to
   const mentionsBot = (msg.mentions || []).some(u => u.id === botId) ||
     lower.includes(`<@${botId}>`) ||
     lower.includes(`<@!${botId}>`);
 
   const isReplyToBot = msg.referenced_message && msg.referenced_message.author && msg.referenced_message.author.id === botId;
-
   const isExplicitCommand = content.startsWith("!");
 
   // In #rep-counter, pure numbers are for counting, don't chat unless directly pinged/commanded
@@ -305,36 +241,30 @@ export async function handleSmartChat(msg, { botId, discordApi, reactEmoji, log 
     return;
   }
 
-  // In #bot-corner: highly interactive!
   const isBotCorner = chId === BOT_CORNER_CH;
-
-  // In #general and #fitness-talk: responsive to gym triggers, PRs, questions
   const isGymChannel = chId === GENERAL_CH || chId === FITNESS_TALK_CH;
 
   let shouldReply = false;
   let replyText = "";
 
   if (mentionsBot || isReplyToBot || isExplicitCommand) {
-    // 100% reply rate on mentions, replies, or commands
     shouldReply = true;
     replyText = generateChatResponse(msg);
   } else if (isBotCorner) {
-    // In bot corner, respond if not a foreign bot command (like pls, beg, hunt, etc.)
     const isForeignBotCmd = /^(pls|beg|hunt|fish|dig|pm|postmemes|m!|p!|c!|\/)/i.test(content);
-    if (!isForeignBotCmd && canTriggerAmbient(chId, 4000)) {
+    if (!isForeignBotCmd && canTriggerAmbient(chId, 3000)) {
       shouldReply = true;
       replyText = generateChatResponse(msg);
     }
   } else if (isGymChannel) {
-    // In general / fitness talk, respond if fitness/PR/gym trigger matched and cooldown allows
     const hasGymKeywords = /\b(pr|pb|leg day|squat|bench|deadlift|creatine|protein|bulk|cut|workout|gym|lifting|form|cheat meal|tired|lazy|motivation|ronnie|cbum|zyzz|split|macros)\b/i.test(lower);
-    if (hasGymKeywords && canTriggerAmbient(chId, 10000)) {
+    if (hasGymKeywords && canTriggerAmbient(chId, 8000)) {
       shouldReply = true;
       replyText = generateChatResponse(msg);
     }
   }
 
-  // Add smart reactions for PRs or wins
+  // Reactions for PRs or wins
   if (/\b(pr|pb|personal record|hit 100|hit 120|hit 140|hit 160|hit 200)\b/i.test(lower)) {
     if (reactEmoji) {
       reactEmoji(chId, msg.id, "cb_big_w:1563245281661690036").catch(() => {});
