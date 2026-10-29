@@ -1,6 +1,18 @@
 import fs from 'fs';
 
-const TOKEN = process.env.DISCORD_TOKEN || Buffer.from("TVRVMk1qRTBOelV5TnpjMk1qRXlORGd6TVEuR1NzOHpxLkxBcUZSdDVIMTJETmNZaHlSS1pwRjhycmFNdU9IWEI2SXR2bHNV", "base64").toString("utf-8");
+// Load KEY=VALUE pairs from .env (lives on the server only, never committed)
+try {
+  for (const line of fs.readFileSync(new URL("./.env", import.meta.url), "utf8").split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+  }
+} catch (e) {}
+
+const TOKEN = process.env.DISCORD_TOKEN;
+if (!TOKEN) {
+  console.error("[FATAL] DISCORD_TOKEN is not set. Add it to /home/container/.env as DISCORD_TOKEN=your_token");
+  process.exit(1);
+}
 const GUILD_ID = "1562037193961242644";
 const BOT_ID = "1562147527762124831";
 const WOLF_ID = "1042743525705523291";

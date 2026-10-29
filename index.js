@@ -13,7 +13,19 @@ import {
   NoSubscriberBehavior
 } from '@discordjs/voice';
 
-const TOKEN = process.env.DISCORD_TOKEN || Buffer.from("TVRVMk1qRTBOelV5TnpjMk1qRXlORGd6TVEuR1NzOHpxLkxBcUZSdDVIMTJETmNZaHlSS1pwRjhycmFNdU9IWEI2SXR2bHNV", "base64").toString("utf-8");
+// Load KEY=VALUE pairs from .env (lives on the server only, never committed)
+try {
+  for (const line of fs.readFileSync(new URL("./.env", import.meta.url), "utf8").split(/\r?\n/)) {
+    const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/);
+    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^(['"])(.*)\1$/, "$2");
+  }
+} catch (e) {}
+
+const TOKEN = process.env.DISCORD_TOKEN;
+if (!TOKEN) {
+  console.error("[FATAL] DISCORD_TOKEN is not set. Add it to /home/container/.env as DISCORD_TOKEN=your_token");
+  process.exit(1);
+}
 const GUILD_ID = "1562037193961242644";
 const BOT_ID = "1562147527762124831";
 const WOLF_ID = "1042743525705523291";
@@ -286,7 +298,7 @@ async function handleMessageXp(msg) {
           embeds: [
             {
               title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
-              description: `>>> Huge props on hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
+              description: `Huge props on hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
               color: unlockedRole ? 0xF1C40F : 0x2ECC71,
               footer: { text: "Chic Gang Native Leveling Engine • Private Level Alert" },
               timestamp: new Date().toISOString()
@@ -302,7 +314,7 @@ async function handleMessageXp(msg) {
           embeds: [
             {
               title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
-              description: `>>> Huge props to **${author.global_name || author.username}** (<@${userId}>) for hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
+              description: `Huge props to **${author.global_name || author.username}** (<@${userId}>) for hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
               color: unlockedRole ? 0xF1C40F : 0x2ECC71,
               thumbnail: {
                 url: author.avatar
@@ -444,7 +456,7 @@ async function sendMemberWelcome(user) {
         embeds: [
           {
             title: `🦾 NEW GYM UTILITY BOT // @${user.username} CONNECTED`,
-            description: `>>> <@${user.id}> has joined **Chic Gang**! The **🤖 Bots** role has been automatically provisioned.\n\nFor arcade games, economy commands, or bot utilities, check out <#${BOT_CORNER_CH}> and <#${DANK_MEMER_CH}>!`,
+            description: `<@${user.id}> has joined **Chic Gang**! The **🤖 Bots** role has been automatically provisioned.\n\nFor arcade games, economy commands, or bot utilities, check out <#${BOT_CORNER_CH}> and <#${DANK_MEMER_CH}>!`,
             color: 0x9B59B6,
             thumbnail: { url: avatarUrl },
             image: { url: gifUrl },
@@ -472,7 +484,7 @@ async function sendMemberWelcome(user) {
       embeds: [
         {
           title: "⚡ NEW ATHLETE ENTERED THE FLOOR // WELCOME TO CHIC GANG",
-          description: `>>> Hey **${user.global_name || user.username}** (<@${user.id}>), welcome to **Chic Gang**—the official community for **Chic Builder** and high-voltage gym culture.\n\nWhether you're hitting high-bar squats, chasing an 8-plate deadlift, or tracking progressive overload offline, you're rolling with the squad now. No cap, no excuses.`,
+          description: `Hey **${user.global_name || user.username}** (<@${user.id}>), welcome to **Chic Gang**—the official community for **Chic Builder** and high-voltage gym culture.\n\nWhether you're hitting high-bar squats, chasing an 8-plate deadlift, or tracking progressive overload offline, you're rolling with the squad now. No cap, no excuses.`,
           color: 0x2ECC71,
           thumbnail: { url: avatarUrl },
           image: { url: gifUrl },
@@ -894,7 +906,7 @@ async function handleRepCounterMessage(d) {
         embeds: [
           {
             title: "🚨 FORM BREAK // DOUBLE SET FOUL!",
-            description: `>>> <@${userId}> tried to count twice in a row at **${repState.currentCount} reps**!\n\nForm is completely broken. Barbell has been reset back to **1**! Grab your chalk and pick it back up lifters! 🍼`,
+            description: `<@${userId}> tried to count twice in a row at **${repState.currentCount} reps**!\n\nForm is completely broken. Barbell has been reset back to **1**! Grab your chalk and pick it back up lifters! 🍼`,
             color: 0xE74C3C,
             footer: { text: "Chic Gang Barbell Form Checker" },
             timestamp: new Date().toISOString()
@@ -919,7 +931,7 @@ async function handleRepCounterMessage(d) {
         embeds: [
           {
             title: "🚨 FORM BREAK // MISSED REP!",
-            description: `>>> <@${userId}> counted **${num}**, but the barbell needed **${expected}**!\n\nThe set was ruined at **${repState.currentCount} reps**. Count reset to **1**! Lock in lifters! 🍼`,
+            description: `<@${userId}> counted **${num}**, but the barbell needed **${expected}**!\n\nThe set was ruined at **${repState.currentCount} reps**. Count reset to **1**! Lock in lifters! 🍼`,
             color: 0xE74C3C,
             footer: { text: "Chic Gang Barbell Form Checker" },
             timestamp: new Date().toISOString()
@@ -953,7 +965,7 @@ async function handleRepCounterMessage(d) {
         embeds: [
           {
             title: `🏆 BARBELL MILESTONE // ${num.toLocaleString()} REPS LOCKED!`,
-            description: `>>> **HEAVY WORKING SET MILESTONE ACHIEVED!**\n<@${userId}> just racked Rep **#${num.toLocaleString()}** on the community barbell!\n\nKeep rhythm, maintain strict form, and push to the next milestone! 🏋️‍♂️⚡🔥`,
+            description: `**HEAVY WORKING SET MILESTONE ACHIEVED!**\n<@${userId}> just racked Rep **#${num.toLocaleString()}** on the community barbell!\n\nKeep rhythm, maintain strict form, and push to the next milestone! 🏋️‍♂️⚡🔥`,
             color: 0xF1C40F,
             footer: { text: "Chic Gang Strength Milestone" },
             timestamp: new Date().toISOString()
@@ -986,7 +998,7 @@ async function handleDisboardMessage(msg) {
       embeds: [
         {
           title: "🚀 SERVER BUMP RECORDED // COOLDOWN LOCKED",
-          description: `>>> Thank you for bumping **Chic Gang** on Disboard!\n\n⏳ **Next bump ready:** <t:${unixStamp}:R> (<t:${unixStamp}:T>)\n\nChic Bot will ping <@&${BUMP_PING_ROLE_ID}> the second the 2-hour window opens!`,
+          description: `Thank you for bumping **Chic Gang** on Disboard!\n\n⏳ **Next bump ready:** <t:${unixStamp}:R> (<t:${unixStamp}:T>)\n\nChic Bot will ping <@&${BUMP_PING_ROLE_ID}> the second the 2-hour window opens!`,
           color: 0x2ECC71,
           footer: { text: "Chic Gang Growth Engine • Disboard Tracker" },
           timestamp: new Date().toISOString()
@@ -1306,7 +1318,7 @@ function initDankMemerReminders() {
         embeds: [
           {
             title: "🐸 DANK MEMER COOLDOWN CHECK // GRIND TIME",
-            description: ">>> **Time to stack your gym balance!**\nRun your commands right now to maximize your wallet:\n\n• `/daily` — Claim free coins streak\n• `/work` — Clock into your shift\n• `/beg` — Grab some street cash\n• `/hunt` & `/fish` — Gather rare catches\n• `/deposit all` — Protect your bag from robbers!\n\n*Keep grinding the gym economy 24/7!*",
+            description: "**Time to stack your gym balance!**\nRun your commands right now to maximize your wallet:\n\n• `/daily` — Claim free coins streak\n• `/work` — Clock into your shift\n• `/beg` — Grab some street cash\n• `/hunt` & `/fish` — Gather rare catches\n• `/deposit all` — Protect your bag from robbers!\n\n*Keep grinding the gym economy 24/7!*",
             color: 0x2ECC71,
             footer: { text: "Chic Gang Arcade Sentinel" },
             timestamp: new Date().toISOString()
@@ -1494,7 +1506,7 @@ async function handleInteraction(interaction) {
           embeds: [
             {
               title: "👑 Chic Gang | Leadership Hierarchy",
-              description: ">>> **The official server leadership & administration structure:**\n\n• **👑 Co-Founder / Founders** — Core server direction, product vision & engineering.\n• **🛡️ Moderators** — Community safety, form check moderation & respect enforcement.\n• **⚡ Verified Lifters** — Dedicated server athletes with verified status.\n\n*Reach out to any staff member via <#1562037195965993057> if you need assistance!*",
+              description: "**The official server leadership & administration structure:**\n\n• **👑 Co-Founder / Founders** — Core server direction, product vision & engineering.\n• **🛡️ Moderators** — Community safety, form check moderation & respect enforcement.\n• **⚡ Verified Lifters** — Dedicated server athletes with verified status.\n\n*Reach out to any staff member via <#1562037195965993057> if you need assistance!*",
               color: 0xE74C3C,
               footer: { text: "Chic Gang Staff Desk" }
             }
@@ -1512,16 +1524,16 @@ async function handleInteraction(interaction) {
 
       if (val === "rule_sec_1") {
         title = "🔒 SECTION I // SERVER SECURITY & SAFETY";
-        desc = ">>> **1. No NSFW or Explicit Media:** Strictly prohibited in all public channels and avatars.\n**2. No Harassment, Slurs, or Doxxing:** Zero tolerance for personal attacks, threats, or releasing private info.\n**3. No Scamming or Malicious Links:** Unauthorized advertising, pirated software, or token grabbers lead to permanent bans.";
+        desc = "**1. No NSFW or Explicit Media:** Strictly prohibited in all public channels and avatars.\n**2. No Harassment, Slurs, or Doxxing:** Zero tolerance for personal attacks, threats, or releasing private info.\n**3. No Scamming or Malicious Links:** Unauthorized advertising, pirated software, or token grabbers lead to permanent bans.";
       } else if (val === "rule_sec_2") {
         title = "⚡ SECTION II // GYM FLOOR ETIQUETTE & LIFTING INTEGRITY";
-        desc = ">>> **1. Respect Form Critiques:** Constructive advice only. Zero ego lifting shaming.\n**2. No Dangerous Advice:** Do not prescribe unverified PED cycles, unsafe medical regimens, or extreme dehydration cuts.\n**3. Channel Routing:** Keep memes in <#1563245239727165601>, bot commands in <#1562037196918227003>, and training discussion in <#1562037196238757920>.";
+        desc = "**1. Respect Form Critiques:** Constructive advice only. Zero ego lifting shaming.\n**2. No Dangerous Advice:** Do not prescribe unverified PED cycles, unsafe medical regimens, or extreme dehydration cuts.\n**3. Channel Routing:** Keep memes in <#1563245239727165601>, bot commands in <#1562037196918227003>, and training discussion in <#1562037196238757920>.";
       } else if (val === "rule_sec_3") {
         title = "🛡️ SECTION III // DISCIPLINARY LADDER";
-        desc = ">>> **Violation Severity Scale:**\n• **1st Offense:** Formal warning logged in server record.\n• **2nd Offense:** 24-Hour timeout from all text and voice channels.\n• **3rd Offense:** Temporary 7-day server suspension.\n• **Severe Offenses (Doxxing, Exploits, Hate Speech):** Immediate permanent IP ban.";
+        desc = "**Violation Severity Scale:**\n• **1st Offense:** Formal warning logged in server record.\n• **2nd Offense:** 24-Hour timeout from all text and voice channels.\n• **3rd Offense:** Temporary 7-day server suspension.\n• **Severe Offenses (Doxxing, Exploits, Hate Speech):** Immediate permanent IP ban.";
       } else if (val === "rule_sec_report") {
         title = "🎫 HOW TO REPORT A RULE VIOLATION";
-        desc = ">>> **Need Moderator Assistance?**\nClick the **🎫 Open Support Ticket** button below or head over to <#1562037195965993057> to open a confidential private thread with server staff.";
+        desc = "**Need Moderator Assistance?**\nClick the **🎫 Open Support Ticket** button below or head over to <#1562037195965993057> to open a confidential private thread with server staff.";
         color = 0x3498DB;
       }
 
@@ -1550,17 +1562,17 @@ async function handleInteraction(interaction) {
           embeds: [
             {
               title: "🔒 SECTION I // SERVER SECURITY & SAFETY",
-              description: ">>> **1. Zero NSFW / Gore:** Immediate permanent ban.\n**2. No Doxxing or Harassment:** Respect lifters' privacy.\n**3. No Scams / Phishing:** Malicious links or unauthorized promo are blocked.",
+              description: "**1. Zero NSFW / Gore:** Immediate permanent ban.\n**2. No Doxxing or Harassment:** Respect lifters' privacy.\n**3. No Scams / Phishing:** Malicious links or unauthorized promo are blocked.",
               color: 0xE74C3C
             },
             {
               title: "⚡ SECTION II // GYM FLOOR ETIQUETTE",
-              description: ">>> **1. Lifting Respect:** Constructive critique only.\n**2. No Fake PRs:** Keep lifting metrics authentic.\n**3. Stay on designated channels.**",
+              description: "**1. Lifting Respect:** Constructive critique only.\n**2. No Fake PRs:** Keep lifting metrics authentic.\n**3. Stay on designated channels.**",
               color: 0xF1C40F
             },
             {
               title: "🛡️ SECTION III // DISCIPLINARY LADDER",
-              description: ">>> **Warning ➔ 24h Mute ➔ 7d Ban ➔ Permanent IP Ban**\nFair, strict, and disciplined.",
+              description: "**Warning ➔ 24h Mute ➔ 7d Ban ➔ Permanent IP Ban**\nFair, strict, and disciplined.",
               color: 0x9B59B6,
               footer: { text: "Chic Gang Full Rulebook • Private View" }
             }
@@ -1667,7 +1679,7 @@ async function handleInteraction(interaction) {
           embeds: [
             {
               title: `🎫 SUPPORT TICKET // #${newTicketChan.name}`,
-              description: `>>> **Welcome <@${userId}>!**\nThank you for reaching out to the Chic Gang team.\n\n**Topic:**\n\`${topic}\`\n\n**Details:**\n${details}`,
+              description: `**Welcome <@${userId}>!**\nThank you for reaching out to the Chic Gang team.\n\n**Topic:**\n\`${topic}\`\n\n**Details:**\n${details}`,
               color: 0x3498DB
             }
           ],
@@ -1904,6 +1916,19 @@ function connectGateway() {
         log(`[Gateway] Disallowed intent 32768 detected! Falling back to non-privileged intents...`);
         enableMessageContentIntent = false;
         setTimeout(connectGateway, 1000);
+        return;
+      }
+
+      // Code 4007 (invalid seq) / 4009 (session timed out): session is gone, IDENTIFY fresh
+      if (event.code === 4007 || event.code === 4009) {
+        sessionId = null;
+        lastSequence = null;
+        resumeGatewayUrl = null;
+      }
+
+      // Codes 4010-4014: retrying cannot fix these
+      if (event.code >= 4010 && event.code <= 4014) {
+        log(`[FATAL] Gateway ${event.code}: Non-recoverable close (bad shard, sharding required, invalid API version or intents). Stopping reconnect loop.`);
         return;
       }
 
