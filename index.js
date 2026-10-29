@@ -285,57 +285,58 @@ async function handleMessageXp(msg) {
       }
     }
 
-    const roleNotice = unlockedRole
-      ? `\n\n🏆 **NEW PRESTIGE UNLOCKED:** <@&${unlockedRole.id}>\nWear your discipline with pride on the gym floor!`
-      : ``;
-
-    // Hidden personal level-up alert to avoid spamming the channel
-    try {
-      const dmChannel = await discordApi('/users/@me/channels', 'POST', { recipient_id: userId });
-      if (dmChannel && dmChannel.id) {
-        await discordApi(`/channels/${dmChannel.id}/messages`, 'POST', {
-          content: `🎉 **CHIC GANG LEVEL UP // LEVEL ${newLevel}!** ⚡🔥`,
-          embeds: [
-            {
-              title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
-              description: `Huge props on hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
-              color: unlockedRole ? 0xF1C40F : 0x2ECC71,
-              footer: { text: "Chic Gang Native Leveling Engine • Private Level Alert" },
-              timestamp: new Date().toISOString()
-            }
-          ]
-        });
-      }
-    } catch (dmErr) {
-      // If DMs closed, post temporary alert in WINS_CH and auto-delete after 20 seconds
-      try {
-        const tempMsg = await discordApi(`/channels/${WINS_CH}/messages`, "POST", {
-          content: `🎉 **LEVEL UP ALERT // <@${userId}> REACHED LEVEL ${newLevel}!** ⚡🔥 *(Auto-cleaning in 20s)*`,
-          embeds: [
-            {
-              title: `⚡ CHIC GANG PROGRESSION // LEVEL UP`,
-              description: `Huge props to **${author.global_name || author.username}** (<@${userId}>) for hitting **Level ${newLevel}**!${roleNotice}\n\nKeep participating in discussions, training logs, and meme drops to climb toward **<@&1563809433014898688>**!`,
-              color: unlockedRole ? 0xF1C40F : 0x2ECC71,
-              thumbnail: {
-                url: author.avatar
-                  ? `https://cdn.discordapp.com/avatars/${userId}/${author.avatar}.png?size=256`
-                  : `https://cdn.discordapp.com/embed/avatars/0.png`
-              },
-              footer: { text: "Chic Gang Native Leveling Engine • 100% Free & Automated" },
-              timestamp: new Date().toISOString()
-            }
-          ]
-        });
-        if (tempMsg && tempMsg.id) {
-          setTimeout(() => {
-            discordApi(`/channels/${WINS_CH}/messages/${tempMsg.id}`, "DELETE").catch(() => {});
-          }, 20000);
-        }
-      } catch (e) {}
+    // Only role unlocks and every 5th level get a DM; the rest stay quiet (anyone can check with !rank)
+    if (unlockedRole || newLevel % 5 === 0) {
+      await announceLevelUp(author, newLevel, unlockedRole);
     }
   }
 
   saveLevelsDb();
+}
+
+function nextChatterMilestone(level) {
+  const next = Object.keys(CHATTER_ROLES).map(Number).find(m => m > level);
+  return next ? { level: next, role: CHATTER_ROLES[next] } : null;
+}
+
+async function announceLevelUp(author, level, unlockedRole) {
+  const next = nextChatterMilestone(level);
+  const nextLine = next
+    ? `Next unlock: **${next.role.name}** at Level ${next.level}.`
+    : `You've reached the top chat rank. Nothing left to unlock.`;
+
+  // Role names are written out in full because role mentions don't render in DMs
+  const card = embed({
+    title: unlockedRole ? `🏆 Level ${level}: new role unlocked` : `⚡ Level ${level}`,
+    description: (unlockedRole
+      ? `## ${unlockedRole.name}\nYou've been active enough in Chic Gang to earn this role. It's on your profile now.`
+      : `## Level ${level} reached\nYou're putting in the reps in the chat too.`) +
+      `\n${DIVIDER}\n${nextLine}\nCheck your progress anytime with \`!rank\`.`,
+    color: unlockedRole ? COLORS.gold : COLORS.brand,
+    thumbnail: avatarUrl(author),
+    image: GIF("levelup"),
+    footer: "Chic Gang · Private level alert"
+  });
+
+  try {
+    const dmChannel = await discordApi('/users/@me/channels', 'POST', { recipient_id: author.id });
+    await discordApi(`/channels/${dmChannel.id}/messages`, 'POST', { embeds: [card] });
+  } catch (dmErr) {
+    // DMs closed: role unlocks get a short public note in #wins that removes itself after 20 seconds
+    if (!unlockedRole) return;
+    try {
+      const tempMsg = await discordApi(`/channels/${WINS_CH}/messages`, "POST", {
+        content: `<@${author.id}>`,
+        embeds: [card],
+        allowed_mentions: { users: [author.id] }
+      });
+      if (tempMsg && tempMsg.id) {
+        setTimeout(() => {
+          discordApi(`/channels/${WINS_CH}/messages/${tempMsg.id}`, "DELETE").catch(() => {});
+        }, 20000);
+      }
+    } catch (e) {}
+  }
 }
 
 async function discordApi(endpoint, method = "GET", body = null) {
@@ -378,18 +379,62 @@ async function reactEmoji(channelId, messageId, emoji) {
   } catch (e) {}
 }
 
-async function postServerLog(title, description, color = 0x3498DB) {
+// -------------------------------------------------------------
+// Message Style (the_wolf.ie guide: wide headers, clean dividers, few emojis, English only)
+// -------------------------------------------------------------
+const DIVIDER = "─────────────────────────";
+const COLORS = { brand: 0xE5F788, gold: 0xF1C40F, alert: 0xE74C3C, info: 0x3498DB, bot: 0x9B59B6 };
+const NO_PINGS = { parse: [] };
+
+// Branded banners in assets/gifs (bump ?v= when a GIF changes so Discord drops its cached copy)
+const GIF = name => `https://raw.githubusercontent.com/Kukzze/chic-bot-service/main/assets/gifs/${name}.gif?v=1`;
+
+function embed({ title, description, color = COLORS.brand, fields, thumbnail, image, footer = "Chic Gang", timestamp = true }) {
+  const e = { title, description, color };
+  if (fields) e.fields = fields;
+  if (thumbnail) e.thumbnail = { url: thumbnail };
+  if (image) e.image = { url: image };
+  if (footer) e.footer = { text: footer };
+  if (timestamp) e.timestamp = new Date().toISOString();
+  return e;
+}
+
+function avatarUrl(user) {
+  if (user.avatar) return `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256`;
+  let fallback = 0;
+  try { fallback = Number((BigInt(user.id) >> 22n) % 6n); } catch (e) {}
+  return `https://cdn.discordapp.com/embed/avatars/${fallback}.png`;
+}
+
+function displayName(user) {
+  return user.global_name || user.username;
+}
+
+// Reply to a message without pinging the author
+async function replyTo(msg, response) {
+  const payload = typeof response === "string" ? { content: response } : response;
+  try {
+    await discordApi(`/channels/${msg.channel_id}/messages`, "POST", {
+      ...payload,
+      message_reference: { message_id: msg.id, fail_if_not_exists: false },
+      allowed_mentions: { parse: [], replied_user: false }
+    });
+  } catch (err) {
+    log(`[Reply Err] ${err.message}`);
+  }
+}
+
+// Edit the original response of a deferred interaction
+function editOriginal(token, data) {
+  return discordApi(`/webhooks/${BOT_ID}/${token}/messages/@original`, "PATCH", data)
+    .catch(e => log(`[Edit Original Err] ${e.message}`));
+}
+
+async function postServerLog(title, description, color = COLORS.info) {
   try {
     await discordApi(`/channels/${SERVER_LOGS_CH}/messages`, "POST", {
-      embeds: [
-        {
-          title,
-          description,
-          color,
-          footer: { text: "Chic Gang Server Watchdog" },
-          timestamp: new Date().toISOString()
-        }
-      ]
+      embeds: [embed({ title, description, color, footer: "Chic Gang · Server log" })],
+      allowed_mentions: NO_PINGS
     });
   } catch (err) {}
 }
@@ -408,13 +453,9 @@ function isCoolingDown(key, cooldownMs = 10000) {
 // -------------------------------------------------------------
 // Auto Welcome System with Fast History Cache & 4-Layer Trigger
 // -------------------------------------------------------------
-const WELCOME_GIFS = [
-  "https://media.giphy.com/media/BCIoXfA95d1ba/giphy.gif",
-  "https://media.giphy.com/media/d9ktvnNPax++M7Sl8j/giphy.gif",
-  "https://media.giphy.com/media/3o7TKL9J48WENMyrII/giphy.gif",
-  "https://media.giphy.com/media/l41lT4n6ylgW2hh04/giphy.gif",
-  "https://media.giphy.com/media/26AHG5KGFxSkUWw1i/giphy.gif"
-];
+const RULES_CH = "1562037195965993053";
+const SELF_ROLES_CH = "1563614050590662729";
+const TESTING_CH = "1562037196238757925";
 
 const welcomedUserIds = new Set();
 
@@ -441,97 +482,58 @@ async function sendMemberWelcome(user) {
   welcomedUserIds.add(user.id);
 
   try {
-    const avatarUrl = user.avatar
-      ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png?size=256`
-      : `https://cdn.discordapp.com/embed/avatars/0.png`;
-
-    const gifUrl = WELCOME_GIFS[Math.floor(Math.random() * WELCOME_GIFS.length)];
-
+    // The <@id> in content is also how initWelcomedHistory remembers who was already welcomed
     if (user.bot) {
       log(`[Welcome] Broadcasting bot activation for @${user.username} (${user.id})...`);
       await discordApi(`/guilds/${GUILD_ID}/members/${user.id}/roles/${BOTS_ROLE_ID}`, "PUT").catch(() => {});
 
-      const postRes = await discordApi(`/channels/${WELCOME_CH}/messages`, "POST", {
-        content: `🤖 **NEW EQUIPMENT INSTALLED: <@${user.id}> HAS ARRIVED ON THE FLOOR!** ⚡🦾`,
+      await discordApi(`/channels/${WELCOME_CH}/messages`, "POST", {
+        content: `🤖 <@${user.id}> has been added to the server.`,
         embeds: [
-          {
-            title: `🦾 NEW GYM UTILITY BOT // @${user.username} CONNECTED`,
-            description: `<@${user.id}> has joined **Chic Gang**! The **🤖 Bots** role has been automatically provisioned.\n\nFor arcade games, economy commands, or bot utilities, check out <#${BOT_CORNER_CH}> and <#${DANK_MEMER_CH}>!`,
-            color: 0x9B59B6,
-            thumbnail: { url: avatarUrl },
-            image: { url: gifUrl },
-            footer: { text: "Chic Gang Bot Registrar • Floor AI Sentinel" },
-            timestamp: new Date().toISOString()
-          }
-        ]
+          embed({
+            title: `New bot: ${user.username}`,
+            description: `Given the <@&${BOTS_ROLE_ID}> role automatically.\n${DIVIDER}\nBot commands go in <#${BOT_CORNER_CH}>. Dank Memer lives in <#${DANK_MEMER_CH}>.`,
+            color: COLORS.bot,
+            thumbnail: avatarUrl(user),
+            footer: "Chic Gang · Bot registry"
+          })
+        ],
+        allowed_mentions: NO_PINGS
       });
-
-      if (postRes && postRes.id) {
-        for (const emoji of ["🤖", "⚡", "🦾"]) {
-          await fetch(`https://discord.com/api/v10/channels/${WELCOME_CH}/messages/${postRes.id}/reactions/${encodeURIComponent(emoji)}/@me`, {
-            method: "PUT",
-            headers: { Authorization: `Bot ${TOKEN}` }
-          }).catch(() => {});
-        }
-      }
       return;
     }
 
     log(`[Welcome] Broadcasting welcome for athlete @${user.username} (${user.id})...`);
 
     const postRes = await discordApi(`/channels/${WELCOME_CH}/messages`, "POST", {
-      content: `👋 **WELCOME TO THE SQUAD, <@${user.id}>!** Lock in and hit your goals with Chic Gang! ⚡💪🔥`,
+      content: `Welcome to Chic Gang, <@${user.id}>.`,
       embeds: [
-        {
-          title: "⚡ NEW ATHLETE ENTERED THE FLOOR // WELCOME TO CHIC GANG",
-          description: `Hey **${user.global_name || user.username}** (<@${user.id}>), welcome to **Chic Gang**—the official community for **Chic Builder** and high-voltage gym culture.\n\nWhether you're hitting high-bar squats, chasing an 8-plate deadlift, or tracking progressive overload offline, you're rolling with the squad now. No cap, no excuses.`,
-          color: 0x2ECC71,
-          thumbnail: { url: avatarUrl },
-          image: { url: gifUrl },
-          fields: [
-            {
-              name: "1️⃣ STEP UP TO VERIFICATION",
-              value: "> Head to <#1563619147382915184> and tap **⚡ Verify & Enter Chic Gang** to unlock the gym floor.",
-              inline: false
-            },
-            {
-              name: "2️⃣ READ THE COMMANDMENTS",
-              value: "> Review our updated gym rules in <#1562037195965993053>. Zero toxicity, strictly SFW, zero links.",
-              inline: false
-            },
-            {
-              name: "3️⃣ CLAIM YOUR DISCIPLINES",
-              value: "> Pick your lifting style (Powerlifting, Bodybuilding, Calisthenics) in <#1563614050590662729>.",
-              inline: false
-            },
-            {
-              name: "4️⃣ JOIN 10-DAY PLAY STORE TESTING",
-              value: "> Chic Builder Android Alpha is live! Check out <#1562037196238757925> to test 909+ offline exercises.",
-              inline: false
-            }
-          ],
-          footer: {
-            text: "Chic Gang Welcome Desk • Floor AI Sentinel",
-            icon_url: "https://cdn.discordapp.com/emojis/1563621932262232216.webp"
-          },
-          timestamp: new Date().toISOString()
-        }
-      ]
+        embed({
+          title: `⚡ Welcome, ${displayName(user)}`,
+          description:
+            `Chic Gang is the home of **Chic Builder** and a crew of people who take their training seriously. Ask questions, post your lifts, and help the next person out.\n` +
+            `${DIVIDER}\n` +
+            `### Get set up\n` +
+            `**1.** Verify in <#${VERIFY_CH}> to unlock the server.\n` +
+            `**2.** Read the rules in <#${RULES_CH}>.\n` +
+            `**3.** Pick your training style in <#${SELF_ROLES_CH}>.\n` +
+            `**4.** Want early access to the Android app? See <#${TESTING_CH}>.`,
+          thumbnail: avatarUrl(user),
+          image: GIF("welcome"),
+          footer: "Chic Gang · Welcome"
+        })
+      ],
+      allowed_mentions: { users: [user.id] }
     });
 
     if (postRes && postRes.id) {
-      for (const emoji of ["⚡", "💪", "🔥"]) {
-        await fetch(`https://discord.com/api/v10/channels/${WELCOME_CH}/messages/${postRes.id}/reactions/${encodeURIComponent(emoji)}/@me`, {
-          method: "PUT",
-          headers: { Authorization: `Bot ${TOKEN}` }
-        }).catch(() => {});
-      }
+      reactEmoji(WELCOME_CH, postRes.id, "👋");
     }
 
     await postServerLog(
-      "🎉 New Athlete Joined",
-      `**Athlete:** <@${user.id}> (\`${user.username}\`)\n**Welcome Broadcast:** Sent to <#${WELCOME_CH}>`,
-      0x2ECC71
+      "Member joined",
+      `<@${user.id}> (\`${user.username}\`)\nWelcome posted in <#${WELCOME_CH}>.`,
+      COLORS.brand
     );
   } catch (err) {
     log(`[Welcome Error] ${err.message}`);
@@ -579,195 +581,410 @@ function canTriggerAmbient(channelId, cooldownMs = 10000) {
 
 const QUOTES = [
   { quote: "There is no reason to be alive if you can't do the deadlift.", author: "Jón Páll Sigmarsson" },
-  { quote: "Yeah buddy! Lightweight baby! Ain't nothing to it but to do it!", author: "Ronnie Coleman" },
-  { quote: "The last three or four reps is what makes the muscle grow. This area of pain divides a champion from someone who is not a champion.", author: "Arnold Schwarzenegger" },
-  { quote: "If you can still walk to your car after leg day, you didn't do leg day.", author: "Tom Platz" },
-  { quote: "We're all gonna make it, brah.", author: "Zyzz" },
-  { quote: "Don't count the days, make the days count under the bar.", author: "Chris Bumstead" },
-  { quote: "Discipline is doing what you hate to do, but doing it like you love it.", author: "Mike Tyson" }
+  { quote: "Everybody wants to be a bodybuilder, but nobody wants to lift no heavy-ass weights.", author: "Ronnie Coleman" },
+  { quote: "The last three or four reps is what makes the muscle grow.", author: "Arnold Schwarzenegger" },
+  { quote: "Strength does not come from winning. Your struggles develop your strengths.", author: "Arnold Schwarzenegger" },
+  { quote: "Discipline is doing what you hate to do, but doing it like you love it.", author: "Mike Tyson" },
+  { quote: "Don't count the days. Make the days count.", author: "Muhammad Ali" },
+  { quote: "We're all gonna make it, brah.", author: "Zyzz" }
 ];
 
 const ROASTS = [
-  "Bro's upper body is Johnny Bravo, but the lower body is flamingo legs. Rack up the squats today.",
-  "You've been 'bulking' for 3 years straight without a single visible delt vein. That's not a bulk, that's just uncontrolled calorie consumption.",
-  "Your range of motion on bench was so shallow the barbell thought you were just giving it a quick hug.",
-  "Bro spends 45 minutes warming up with resistance bands and green tea just to do 3 sets of phone scrolling on the incline bench.",
-  "Your pre-workout scoop has more active ingredients than your actual lifting routine.",
-  "Half-reps don't build full physiques bro. Lower the ego, lower the weight, touch the chest.",
-  "Lock in! Even the 2.5kg plates are feeling lonely waiting for you to finish talking in the gym lobby."
+  "Upper body says powerlifter, legs say flamingo. The squat rack misses you.",
+  "Three years of bulking and still no visible delts. That's not a bulk, that's a lifestyle.",
+  "Your bench range of motion is so short the bar thinks you're just saying hi.",
+  "45 minutes of band warm-ups for 3 sets of scrolling on the incline bench. Elite work.",
+  "Your pre-workout has more active ingredients than your program.",
+  "Half reps build half physiques. Drop the ego, drop the weight, touch the chest.",
+  "The 2.5 kg plates have been waiting on you longer than your rest timer."
 ];
+
+const PR_REPLIES = [
+  "That's a PR. Log it in Chic Builder before you forget the numbers. 🏆",
+  "New PR on the board. Strong work, now recover well so the next one comes too.",
+  "PR logged in the chat. Respect. Keep the form as clean as that number."
+];
+
+const FORM_CUES = {
+  squat: {
+    name: "Back Squat",
+    cues: [
+      "Big breath into your belly and brace before you unrack, then again before every rep.",
+      "Bar stays over mid-foot the whole way. If it drifts forward, you're folding.",
+      "Knees track in line with your toes. Don't let them cave in on the way up.",
+      "Go as deep as you can while your lower back stays neutral.",
+      "Drive up through your whole foot, chest and hips rising together."
+    ]
+  },
+  bench: {
+    name: "Bench Press",
+    cues: [
+      "Pull your shoulder blades back and down, then keep them pinned for the whole set.",
+      "Feet planted and pushing into the floor. Leg drive is part of the lift.",
+      "Lower the bar under control to your lower chest or sternum.",
+      "Elbows roughly 45–70° from your body, wrists stacked over elbows.",
+      "Press back toward your face slightly, so the bar finishes over your shoulders."
+    ]
+  },
+  deadlift: {
+    name: "Deadlift",
+    cues: [
+      "Bar over mid-foot, shins close to the bar before you pull.",
+      "Lock your lats in, as if you're squeezing oranges in your armpits.",
+      "Take the slack out of the bar before it leaves the floor. No jerking.",
+      "Push the floor away with your legs and keep the bar dragging up your legs.",
+      "Finish by squeezing your glutes. Don't lean back at the top."
+    ]
+  },
+  ohp: {
+    name: "Overhead Press",
+    cues: [
+      "Squeeze your glutes and abs so your lower back doesn't arch.",
+      "Bar starts resting on your front delts, forearms vertical.",
+      "Move your head back out of the way, then push it through once the bar passes.",
+      "Press in a straight line up, finishing with the bar over mid-foot.",
+      "Lock out with your biceps beside your ears."
+    ]
+  },
+  row: {
+    name: "Barbell Row",
+    cues: [
+      "Hinge to roughly 45° with a flat back, knees softly bent.",
+      "Pull to your lower ribs or upper stomach, driving your elbows back.",
+      "Pause briefly at the top and squeeze your back.",
+      "Lower under control. If your torso swings, the weight is too heavy."
+    ]
+  },
+  pullup: {
+    name: "Pull-up",
+    cues: [
+      "Start from a full dead hang, then pull your shoulders down before you bend your arms.",
+      "Think about driving your elbows down toward your ribs.",
+      "Chest toward the bar, chin clearing it at the top.",
+      "Lower all the way down under control. No kipping."
+    ]
+  },
+  rdl: {
+    name: "Romanian Deadlift",
+    cues: [
+      "Soft knees that stay in place. This is a hinge, not a squat.",
+      "Push your hips back and keep the bar close to your legs the whole time.",
+      "Go down until your hamstrings stop you, usually just below the knee.",
+      "Back stays neutral. Squeeze your glutes to stand up."
+    ]
+  },
+  hipthrust: {
+    name: "Hip Thrust",
+    cues: [
+      "Upper back on the edge of the bench, bar padded over your hips.",
+      "Feet placed so your shins are vertical at the top.",
+      "Tuck your chin and tilt your pelvis under at lockout.",
+      "Squeeze your glutes to finish. Don't arch your lower back."
+    ]
+  }
+};
+
+const FORM_ALIASES = {
+  squat: "squat", squats: "squat", "back squat": "squat",
+  bench: "bench", "bench press": "bench", benchpress: "bench",
+  deadlift: "deadlift", deadlifts: "deadlift", dl: "deadlift",
+  ohp: "ohp", "overhead press": "ohp", "military press": "ohp", press: "ohp",
+  row: "row", rows: "row", "barbell row": "row", "bent over row": "row",
+  pullup: "pullup", pullups: "pullup", "pull up": "pullup", "pull-up": "pullup", chinup: "pullup", "chin up": "pullup",
+  rdl: "rdl", "romanian deadlift": "rdl",
+  "hip thrust": "hipthrust", hipthrust: "hipthrust", "hip thrusts": "hipthrust"
+};
+
+const PR_PATTERN = /\b(pr|pb|prs|pbs|personal (best|record)|new max)\b/i;
+const FOREIGN_BOT_CMD = /^(pls|beg|hunt|fish|dig|pm|postmemes|m!|p!|c!|\/|!)/i;
+const GYM_CHANNELS = [GENERAL_CH, FITNESS_TALK_CH, PROGRESS_CH];
 
 function pickItem(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function generateChatResponse(msg) {
+function prResponse() {
+  return { content: pickItem(PR_REPLIES), embeds: [{ color: COLORS.brand, image: { url: GIF("pr") } }] };
+}
+
+function progressBar(fraction, size = 12) {
+  const filled = Math.round(Math.max(0, Math.min(1, fraction)) * size);
+  return "▰".repeat(filled) + "▱".repeat(size - filled);
+}
+
+function formatDuration(ms) {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function helpMessage() {
+  return `## 🏋️ Chic Bot commands\n` +
+    `**Training**\n` +
+    `\`!formcheck <lift>\` Form cues for squat, bench, deadlift, ohp, row, pullup, rdl, hip thrust\n` +
+    `\`!split\` Proven training splits\n` +
+    `\`!macros <weight>\` Calorie and protein estimate (e.g. \`!macros 80\` or \`!macros 180lb\`)\n` +
+    `\`!spot\` Get spotted through your set\n` +
+    `${DIVIDER}\n` +
+    `**Server**\n` +
+    `\`!rank\` Your chat level and progress\n` +
+    `\`!top\` Chat leaderboard\n` +
+    `\`!np\` What's playing on Workout Radio\n` +
+    `${DIVIDER}\n` +
+    `**Fun**\n` +
+    `\`!quote\` · \`!hype\` · \`!roast\` · \`!flip\` · \`!8ball <question>\`\n` +
+    `-# You can also mention me or reply to me with a training question.`;
+}
+
+function formCheckResponse(raw) {
+  const query = raw.replace(/^!formcheck/i, "").trim().toLowerCase();
+  const key = FORM_ALIASES[query] || FORM_ALIASES[query.replace(/s$/, "")];
+  const options = Object.values(FORM_CUES).map(f => f.name).join(", ");
+  if (!key) {
+    return query
+      ? `I don't have cues for **${query}** yet. Try one of these: ${options}.`
+      : `Tell me the lift, e.g. \`!formcheck squat\`. Available: ${options}.`;
+  }
+  const lift = FORM_CUES[key];
+  return `## 📋 ${lift.name}: form cues\n` +
+    lift.cues.map((c, i) => `**${i + 1}.** ${c}`).join("\n") +
+    `\n${DIVIDER}\n-# Film from the side at hip height and post it in <#${FITNESS_TALK_CH}> for real feedback.`;
+}
+
+function macrosResponse(raw) {
+  const match = raw.match(/!macros\s+(\d+(?:\.\d+)?)\s*(kg|kgs|lb|lbs|pounds?)?/i);
+  if (!match) {
+    return "Give me your bodyweight, e.g. `!macros 80` (kg) or `!macros 180lb`.";
+  }
+  const isPounds = /^(lb|lbs|pound|pounds)$/i.test(match[2] || "");
+  const kg = isPounds ? parseFloat(match[1]) * 0.4536 : parseFloat(match[1]);
+  if (kg < 30 || kg > 250) {
+    return "That bodyweight looks off. Use kilograms (`!macros 80`) or add `lb` (`!macros 180lb`).";
+  }
+
+  const round10 = n => Math.round(n / 10) * 10;
+  const maintenance = round10(kg * 33);
+  const label = isPounds ? `${Math.round(parseFloat(match[1]))} lb` : `${Math.round(kg)} kg`;
+
+  return `## 📊 Macro estimate: ${label}\n` +
+    `**Maintenance:** ~${maintenance.toLocaleString()} kcal/day\n` +
+    `**Lean bulk:** ~${(maintenance + 250).toLocaleString()} kcal/day (+250)\n` +
+    `**Cut:** ~${(maintenance - 500).toLocaleString()} kcal/day (−500)\n` +
+    `${DIVIDER}\n` +
+    `**Protein:** ${Math.round(kg * 1.6)}–${Math.round(kg * 2.2)} g/day (1.6–2.2 g per kg)\n` +
+    `**Fat:** at least ${Math.round(kg * 0.8)} g/day\n` +
+    `**Carbs:** the rest of your calories\n` +
+    `-# Rough estimate for a moderately active adult. Weigh in daily for two weeks and adjust by 100–200 kcal based on the trend.`;
+}
+
+function rankResponse(msg) {
+  const mentionedId = (msg.content.match(/<@!?(\d+)>/g) || [])
+    .map(m => m.replace(/\D/g, ""))
+    .find(id => id !== BOT_ID);
+  const targetId = mentionedId || msg.author.id;
+  const target = (msg.mentions || []).find(u => u.id === targetId) || (targetId === msg.author.id ? msg.author : null);
+  const record = levelsDb[targetId];
+  const isSelf = targetId === msg.author.id;
+
+  if (!record) {
+    return isSelf
+      ? "You haven't earned any XP yet. Chat in the server and you'll start leveling."
+      : `<@${targetId}> hasn't earned any XP yet.`;
+  }
+
+  const { level, currentXp, requiredXp, progress } = getLevelAndProgress(record.xp);
+  const ranked = Object.entries(levelsDb).sort((a, b) => (b[1].xp || 0) - (a[1].xp || 0));
+  const position = ranked.findIndex(([id]) => id === targetId) + 1;
+  const next = nextChatterMilestone(level);
+  const name = target ? displayName(target) : record.username;
+
+  return {
+    embeds: [
+      embed({
+        title: `${name}: Level ${level}`,
+        description:
+          `${progressBar(progress)} **${Math.floor(progress * 100)}%**\n` +
+          `${currentXp.toLocaleString()} / ${requiredXp.toLocaleString()} XP to Level ${level + 1}\n` +
+          `${DIVIDER}\n` +
+          `**Server rank:** #${position} of ${ranked.length}\n` +
+          `**Total XP:** ${record.xp.toLocaleString()}\n` +
+          (next ? `**Next role:** <@&${next.role.id}> at Level ${next.level}` : `**Top chat rank reached.**`),
+        thumbnail: target ? avatarUrl(target) : undefined,
+        footer: "Chic Gang · Chat levels",
+        timestamp: false
+      })
+    ]
+  };
+}
+
+function leaderboardResponse() {
+  const medals = ["🥇", "🥈", "🥉"];
+  const top = Object.entries(levelsDb)
+    .sort((a, b) => (b[1].xp || 0) - (a[1].xp || 0))
+    .slice(0, 10);
+
+  if (top.length === 0) return "The leaderboard is empty. Start chatting to claim the top spot.";
+
+  const lines = top.map(([id, rec], i) => {
+    const { level } = getLevelAndProgress(rec.xp || 0);
+    const place = medals[i] || `**${i + 1}.**`;
+    return `${place} <@${id}> · Level ${level} · ${(rec.xp || 0).toLocaleString()} XP`;
+  });
+
+  return {
+    embeds: [
+      embed({
+        title: "🏆 Chat leaderboard",
+        description: lines.join("\n") + `\n${DIVIDER}\nCheck your own spot with \`!rank\`.`,
+        color: COLORS.gold,
+        footer: "Chic Gang · Top 10 by XP",
+        timestamp: false
+      })
+    ]
+  };
+}
+
+function nowPlayingResponse() {
+  const t = TRACKS[currentTrackIndex];
+  if (!t || !audioPlayer || audioPlayer.state.status !== AudioPlayerStatus.Playing) {
+    return `Workout Radio is between tracks right now. Join <#${WORKOUT_RADIO_VC}> and it'll be back in a moment.`;
+  }
+  return `## 🎧 Now playing\n**${t.title}** by ${t.artist}\n` +
+    `Track ${currentTrackIndex + 1} of ${TRACKS.length} · ${formatDuration(Date.now() - trackStartTime)} in\n` +
+    `-# Live 24/7 in <#${WORKOUT_RADIO_VC}>`;
+}
+
+// Known ! commands. Returns null for anything else so other bots' commands are left alone.
+function commandResponse(msg) {
   const raw = (msg.content || "").trim();
   const lower = raw.toLowerCase();
-  const authorId = msg.author?.id;
-  const isWolf = authorId === WOLF_ID;
-  const isKukzze = authorId === KUKZZE_ID;
+  if (!lower.startsWith("!")) return null;
+  const cmd = lower.split(/\s+/)[0];
 
-  // Commands
-  if (lower.startsWith("!spot") || lower.includes("spot me")) {
-    return `Hands locked under the barbell. Unracked... down to the sternum... DRIVE THROUGH THE HEELS! It's all you, don't quit on the sticking point! 🏋️‍♂️🔥`;
-  }
-
-  if (lower.startsWith("!roast") || lower.includes("roast me")) {
-    return `💀 ${pickItem(ROASTS)}`;
-  }
-
-  if (lower.startsWith("!quote") || lower === "quote" || lower.includes("motivate me")) {
-    const q = pickItem(QUOTES);
-    return `💬 *"${q.quote}"* — **${q.author}** ⚡💪`;
-  }
-
-  if (lower.startsWith("!hype") || lower.includes("hype me up")) {
-    return `⚡ **TIME TO RERACK THE WORLD!** Pre-workout surging, heart rate primed, zero room for hesitation. Get on the floor and own the iron! 🦾🔥`;
-  }
-
-  if (lower.startsWith("!split") || lower.includes("best split") || lower.includes("workout split")) {
-    return `📋 **Top Tier Workout Splits:**\n` +
-      `• **PPL (Push / Pull / Legs):** Best for hypertrophy & balanced recovery (6-day or 3-day cycle).\n` +
-      `• **Upper / Lower:** Elite for strength & progressive overload (4 days/week).\n` +
-      `• **Arnold Split (Chest+Back / Shoulders+Arms / Legs):** Insane pump & arm volume.\n\n` +
-      `*Tip: Track all sets & progression offline inside the Chic Builder app!* 💪`;
-  }
-
-  if (lower.startsWith("!macros")) {
-    const match = raw.match(/!macros\s+(\d+)/);
-    const weight = match ? parseInt(match[1], 10) : 70;
-    const protein = Math.round(weight * 2);
-    const calsBulk = Math.round(weight * 38);
-    const calsCut = Math.round(weight * 26);
-    return `📊 **Macro Blueprint for ${weight}kg Lifter:**\n` +
-      `• **Daily Protein:** ~${protein}g (2g / kg bodyweight)\n` +
-      `• **Lean Bulk Calories:** ~${calsBulk} kcal/day (+300 surplus)\n` +
-      `• **Cutting Calories:** ~${calsCut} kcal/day (-400 deficit)\n` +
-      `• **Hydration:** Minimum 3.5L water daily. Don't forget 5g creatine! 💧`;
-  }
-
-  if (lower.startsWith("!flip") || lower.includes("flip a coin")) {
-    return Math.random() > 0.5 ? "🪙 **HEADS** — Extra set to failure!" : "🪙 **TAILS** — Drop set on the last exercise!";
-  }
-
-  if (lower.startsWith("!8ball")) {
-    const answers = [
-      "💯 Absolutely, rack the weight and go.",
-      "🚫 Don't do it, your form will collapse.",
-      "🔥 The iron never lies. Yes.",
-      "⚠️ Take a rest day bro, nervous system is fried.",
-      "💪 100% yes, RPE 10 incoming.",
-      "🤷‍♂️ Ask again after you finish your protein shake."
-    ];
-    return `🎱 **Barbell Oracle:** ${pickItem(answers)}`;
-  }
-
-  if (lower.startsWith("!help") || lower === "!commands") {
-    return `⚡ **Chic Spotter Interactive Commands:**\n` +
-      `• \`!spot\` — Get spotted on your set\n` +
-      `• \`!formcheck [exercise]\` — Form cues & checklist\n` +
-      `• \`!split\` — Proven workout splits\n` +
-      `• \`!macros [kg]\` — Calorie & protein targets\n` +
-      `• \`!quote\` — Iconic lifter quotes\n` +
-      `• \`!roast\` — Gym bro reality check\n` +
-      `• \`!hype\` — Pre-workout motivation\n` +
-      `• \`!flip\` & \`!8ball\` — Fun gym decisions\n` +
-      `*Or simply talk to me or tag me anywhere—I'm always on duty!* 🏋️‍♂️`;
-  }
-
-  // Wolfie recognition (the_wolf.ie - clear, grounded, respectful, human-like)
-  if (isWolf) {
-    if (lower.includes("changes") || lower.includes("update") || lower.includes("task") || lower.includes("fix") || lower.includes("check")) {
-      return `Understood, wolf. Everything is verified and running clean. Standing by for any adjustments.`;
+  switch (cmd) {
+    case "!help":
+    case "!commands":
+      return helpMessage();
+    case "!spot":
+      return "Hands under the bar, I've got you. Unrack, control it down, and drive. It's all you until it isn't, and then I've got it. 🏋️";
+    case "!roast":
+      return `💀 ${pickItem(ROASTS)}`;
+    case "!quote": {
+      const q = pickItem(QUOTES);
+      return `*"${q.quote}"*\n— **${q.author}**`;
     }
-    return `On it, wolf. The bot is locked in, workout radio is streaming 24/7, and server operations are fully nominal.`;
-  }
-
-  // Kukzze recognition (dev banter)
-  if (isKukzze) {
-    if (lower.includes("bot") || lower.includes("dev") || lower.includes("code") || lower.includes("app")) {
-      return `Hey dev! Cloud container is operating at 100% health. Keep crushing those sets and pushing code! 💻⚡💪`;
+    case "!hype":
+      return pickItem([
+        "⚡ Headphones in, phone away, first set starts now. You already did the hard part by showing up.",
+        "⚡ Nobody's coming to do these reps for you. Warm up, lock in, and make today count.",
+        "⚡ You've done harder things than this set. Go get it."
+      ]);
+    case "!split":
+      return `## 📋 Proven training splits\n` +
+        `**Full Body** · 3 days/week. Best for beginners and busy schedules.\n` +
+        `**Upper / Lower** · 4 days/week. Great balance of strength and size.\n` +
+        `**Push / Pull / Legs** · 3 or 6 days/week. High volume for hypertrophy.\n` +
+        `**Arnold Split** · Chest+Back / Shoulders+Arms / Legs, 6 days/week. Advanced.\n` +
+        `${DIVIDER}\n` +
+        `The best split is the one you can actually show up for. Track it in Chic Builder.`;
+    case "!macros":
+      return macrosResponse(raw);
+    case "!formcheck":
+      return formCheckResponse(raw);
+    case "!rank":
+    case "!level":
+      return rankResponse(msg);
+    case "!top":
+    case "!leaderboard":
+      return leaderboardResponse();
+    case "!np":
+    case "!nowplaying":
+      return nowPlayingResponse();
+    case "!flip":
+      return Math.random() < 0.5
+        ? "🪙 **Heads.** One more set to failure."
+        : "🪙 **Tails.** Drop set on your last exercise.";
+    case "!8ball": {
+      if (raw.split(/\s+/).length < 2) return "Ask me a question, e.g. `!8ball should I go for a PR today?`";
+      return `🎱 ${pickItem([
+        "Yes. Load the bar.",
+        "No. Your form isn't ready for that yet.",
+        "Signs point to yes. Warm up properly first.",
+        "Take a rest day. Your nervous system will thank you.",
+        "Absolutely. RPE 10 incoming.",
+        "Ask again after your protein shake."
+      ])}`;
     }
+    default:
+      return null;
+  }
+}
+
+// Replies when someone talks to the bot directly (mention, reply, or #bot-corner)
+function conversationResponse(text) {
+  const lower = text.replace(/<@!?\d+>/g, "").trim().toLowerCase();
+
+  if (/\b(spot me)\b/.test(lower)) return commandResponse({ content: "!spot" });
+  if (/\b(roast me)\b/.test(lower)) return commandResponse({ content: "!roast" });
+  if (/\b(motivate me|hype me|hype me up)\b/.test(lower)) return commandResponse({ content: "!hype" });
+  if (/\b(flip a coin)\b/.test(lower)) return commandResponse({ content: "!flip" });
+
+  if (PR_PATTERN.test(lower) && !lower.includes("?")) return prResponse();
+
+  if (/\b(skip(ping)? leg|skip legs)\b/.test(lower)) {
+    return "Skipping leg day is how you end up with a great top half on toothpicks. Squat rack's waiting.";
+  }
+  if (/\b(leg day|squats?|calves|quads|hamstrings)\b/.test(lower)) {
+    return "Leg day. Control the way down, hit depth you own, and don't rush your rest. `!formcheck squat` if you want cues.";
+  }
+  if (/\bcreatine\b/.test(lower)) {
+    return "3–5 g of creatine monohydrate a day, any time of day. No loading phase needed. Consistency is what matters.";
+  }
+  if (/\bcheat meal\b/.test(lower)) {
+    return "One meal won't undo a good week. Hit your protein, enjoy it, and get back on plan at the next meal.";
+  }
+  if (/\b(protein|whey|bulk|bulking|cut|cutting|calories|diet|carbs)\b/.test(lower)) {
+    return "Keep it simple: 1.6–2.2 g of protein per kg of bodyweight, mostly whole foods, and calories set for your goal. `!macros <weight>` gives you numbers.";
+  }
+  if (/\b(lazy|tired|don't feel like|dont feel like|no motivation|demotivated)\b/.test(lower)) {
+    return "Motivation comes and goes. Do the warm-up and the first working set. Most days, that's enough to get you going.";
+  }
+  if (/\b(glutes?|hip thrusts?)\b/.test(lower)) {
+    return "Hip thrusts and RDLs do most of the work for glutes. Pause at the top and actually squeeze. `!formcheck hip thrust` for cues.";
+  }
+  if (/\b(abs|six pack|core)\b/.test(lower)) {
+    return "Abs are built with training and shown with a calorie deficit. Hanging leg raises and cable crunches, then let your diet do the rest.";
+  }
+  if (/\b(biceps?|triceps?|arms|curls?)\b/.test(lower)) {
+    return "Triceps make up most of your arm size, so don't skip them. Full range of motion and control on the way down.";
+  }
+  if (/\b(split|program|routine)\b/.test(lower)) return commandResponse({ content: "!split" });
+  if (/\b(chic builder|the app)\b/.test(lower)) {
+    return "Chic Builder: 909+ exercises that work offline, no ads, and progressive overload tracking built in. 📱";
+  }
+  if (/\b(ronnie|coleman|light ?weight|yeah buddy|yea buddy)\b/.test(lower)) {
+    return "\"Yeah buddy! Light weight, baby!\"\n— **Ronnie Coleman**";
+  }
+  if (/\b(thanks|thank you|thx|ty)\b/.test(lower)) {
+    return pickItem(["Anytime.", "Any time. Go get it.", "Happy to help. Now go train."]);
+  }
+  if (/\b(hi|hello|hey|yo|sup|wassup)\b/.test(lower)) {
+    return pickItem(["Hey. What are you training today?", "Yo. Push, pull or legs today?", "Hey. Ready to put in some work?"]);
   }
 
-  // PR / Heavy Lift Celebrations
-  if (/\b(pr|pb|personal best|personal record|1rm|maxed out|hit 100|hit 120|hit 140|hit 160|hit 200|benched|deadlifted|squatted)\b/i.test(lower)) {
-    return `MASSIVE PR! 🔥 That bar moved with authority. Log that milestone in Chic Builder and keep chasing progressive overload! <:cb_big_w:1563245281661690036>`;
-  }
+  return pickItem([
+    "I'm better with training questions. Try `!help` to see everything I can do.",
+    "Not sure I follow. Ask me about form, splits or macros, or type `!help`.",
+    "Got a training question? Ask away, or type `!help` for commands."
+  ]);
+}
 
-  // Leg Day & Excuses
-  if (/\b(leg day|legs|skip legs|skip leg day|squats|calves|wheels)\b/i.test(lower)) {
-    if (lower.includes("skip")) {
-      return `Skipping leg day is an automatic penalty. You cannot build a fortress on toothpicks. Rerack and hit the squat rack! 🍗❌`;
-    }
-    return `Leg day on deck! Hit proper depth on squats, control the eccentric, and embrace the burn. Wheels under construction! 🏋️‍♂️`;
+// Unprompted replies in gym channels: only for strong signals, so the bot doesn't hijack conversations
+function ambientResponse(lower) {
+  if (PR_PATTERN.test(lower) && !lower.includes("?")) return prResponse();
+  if (/\b(skip(ping)? leg|skip legs)\b/.test(lower)) {
+    return "Skipping leg day is how you end up with a great top half on toothpicks. Squat rack's waiting.";
   }
-
-  // Diet & Nutrition
-  if (/\b(creatine|protein|whey|bulk|cut|calories|diet|chicken|carbs|cheat meal)\b/i.test(lower)) {
-    if (lower.includes("cheat")) {
-      return `Enjoy the cheat meal for glycogen replenishment, but hit your daily protein goal first and put those extra calories to work on heavy compound lifts tomorrow! 💪`;
-    }
-    if (lower.includes("creatine")) {
-      return `5g of creatine monohydrate daily. No fancy loading phase needed. Just stay consistent and drink plenty of water! 💧`;
-    }
-    return `Keep nutrition dialed in: 1.6 to 2.2g of protein per kg of bodyweight, eat around maintenance according to your goals, and prioritize whole foods.`;
-  }
-
-  // Tired / Motivation
-  if (/\b(lazy|tired|don't feel like|no motivation|skip today|demotivated)\b/i.test(lower)) {
-    return `Discipline beats motivation every day of the week. The iron doesn't care if you're tired. Show up, warm up, and let the pump take over! 🔥`;
-  }
-
-  // Glutes / Ass / Hips
-  if (/\b(glute|glutes|ass|butt|hip thrust)\b/i.test(lower)) {
-    return `Hip thrusts are non-negotiable. Build glutes of steel so your lower back doesn't take the hit on heavy deadlifts! 🍑🏋️‍♂️`;
-  }
-
-  // Shhh / Silence
-  if (/\b(shh|shhh|shhhh|shhhhh|quiet)\b/i.test(lower) || lower.includes("shhhhh")) {
-    return `🤫 *Shhh... locking in.* No talking on the platform, strictly iron moving. 🗿⚡`;
-  }
-
-  // Let's Go / Hype
-  if (/\b(lets goo|let's go|lets go)\b/i.test(lower)) {
-    return `⚡ **LETS GOOOO!** Rerack the weight, lock the collar, and own this set! 🔥`;
-  }
-
-  // Arms / Biceps
-  if (/\b(bicep|biceps|arms|tricep|triceps|curl|curls)\b/i.test(lower)) {
-    return `Curls for the girls! Just don't curl in the squat rack unless you want the whole gym giving you the side-eye. 💪`;
-  }
-
-  // Abs / Core
-  if (/\b(abs|six pack|core|belly)\b/i.test(lower)) {
-    return `Abs are forged in the gym and revealed in the kitchen. Dial in that caloric deficit and hit your hanging leg raises! 🥗`;
-  }
-
-  // Chic Builder App Mention
-  if (/\b(app|chic builder|exercises|tracker|workout log|logging)\b/i.test(lower)) {
-    return `Chic Builder is built for serious lifters: **909+ offline exercises**, zero ads, local logging, and clean progressive overload tracking. 📱⚡`;
-  }
-
-  // Greetings
-  if (/\b(hi|hello|hey|yo|sup|wassup)\b/i.test(lower)) {
-    return `Yo! Ready to put in work today? What are we training? 🏋️‍♂️`;
-  }
-
-  // Ronnie / CBum / Zyzz triggers
-  if (/\b(ronnie|coleman|lightweight|light weight|yea buddy|yeah buddy|cbum|zyzz)\b/i.test(lower)) {
-    return `⚡ **"YEAAAH BUDDY! LIGHT WEIGHT BABY! AIN'T NOTHING TO IT BUT TO DO IT!"** — *Big Ron* 🏋️‍♂️💪🔥`;
-  }
-
-  // Conversational Fallback (English only)
-  const enResponses = [
-    `Spotter on duty! What's the play today—heavy compounds or hypertrophy volume? 💪`,
-    `Heard you loud and clear. Keep the intensity high and don't rush through the eccentrics! 🏋️‍♂️`,
-    `Locked in on the floor. Drop your questions, track your PRs, and let's get those numbers up! ⚡`,
-    `Always listening. Barbell is racked and ready whenever you are! 🔥`
-  ];
-  return pickItem(enResponses);
+  return null;
 }
 
 async function handleChatKeywords(msg) {
@@ -781,63 +998,40 @@ async function handleChatKeywords(msg) {
   const mentionsBot = (msg.mentions || []).some(u => u.id === BOT_ID) ||
     lower.includes(`<@${BOT_ID}>`) ||
     lower.includes(`<@!${BOT_ID}>`);
+  const isReplyToBot = msg.referenced_message?.author?.id === BOT_ID;
+  const command = commandResponse(msg);
 
-  const isReplyToBot = msg.referenced_message && msg.referenced_message.author && msg.referenced_message.author.id === BOT_ID;
-  const isExplicitCommand = content.startsWith("!");
-
-  // In #rep-counter, pure numbers are for counting, don't chat unless directly pinged/commanded
+  // In #rep-counter, numbers are for counting; only answer when pinged or commanded
   if (chId === REP_COUNTER_CH) {
-    if (mentionsBot || isExplicitCommand) {
-      const reply = `🏋️‍♂️ **Spotter on duty!** The barbell is racked at **${repState.currentCount} reps** (next rep is **${repState.currentCount + 1}**)! Drop your count lifters! 💪⚡`;
-      await discordApi(`/channels/${chId}/messages`, "POST", {
-        content: reply,
-        message_reference: { message_id: msg.id }
-      }).catch(() => {});
+    if (mentionsBot || command) {
+      await replyTo(msg, `The bar is at **${repState.currentCount}**. Next rep is **${repState.currentCount + 1}**. One number each, no counting twice in a row.`);
     }
     return;
   }
 
-  const isBotCorner = chId === BOT_CORNER_CH;
-  const isGymChannel = chId === GENERAL_CH || chId === FITNESS_TALK_CH;
-
-  let shouldReply = false;
-  let replyText = "";
-
-  if (mentionsBot || isReplyToBot || isExplicitCommand) {
-    shouldReply = true;
-    replyText = generateChatResponse(msg);
-  } else if (isBotCorner) {
-    const isForeignBotCmd = /^(pls|beg|hunt|fish|dig|pm|postmemes|m!|p!|c!|\/)/i.test(content);
-    if (!isForeignBotCmd && canTriggerAmbient(chId, 3000)) {
-      shouldReply = true;
-      replyText = generateChatResponse(msg);
-    }
-  } else if (isGymChannel) {
-    const hasGymKeywords = /\b(pr|pb|leg day|squat|bench|deadlift|creatine|protein|bulk|cut|workout|gym|lifting|form|cheat meal|tired|lazy|motivation|ronnie|cbum|zyzz|split|macros)\b/i.test(lower);
-    if (hasGymKeywords && canTriggerAmbient(chId, 8000)) {
-      shouldReply = true;
-      replyText = generateChatResponse(msg);
-    }
-  }
-
-  // Reactions for PRs or wins
-  if (/\b(pr|pb|personal record|hit 100|hit 120|hit 140|hit 160|hit 200)\b/i.test(lower)) {
+  // React to PR posts
+  if (PR_PATTERN.test(lower) && !lower.includes("?")) {
     reactEmoji(chId, msg.id, "cb_big_w:1563245281661690036").catch(() => {});
     reactEmoji(chId, msg.id, "cb_pr:1563245271784103957").catch(() => {});
-    reactEmoji(chId, msg.id, "🔥").catch(() => {});
   }
 
-  if (shouldReply && replyText) {
-    try {
-      log(`[Smart Chat] Replying to @${author.username} in #${chId}: "${replyText.slice(0, 50)}..."`);
-      await discordApi(`/channels/${chId}/messages`, "POST", {
-        content: replyText,
-        message_reference: { message_id: msg.id }
-      });
-    } catch (err) {
-      log(`[Smart Chat Err] ${err.message}`);
+  let response = command;
+  if (!response) {
+    if (mentionsBot || isReplyToBot) {
+      response = conversationResponse(content);
+    } else if (chId === BOT_CORNER_CH) {
+      if (!FOREIGN_BOT_CMD.test(content) && canTriggerAmbient(chId, 3000)) {
+        response = conversationResponse(content);
+      }
+    } else if (GYM_CHANNELS.includes(chId)) {
+      const ambient = ambientResponse(lower);
+      if (ambient && canTriggerAmbient(chId, 10 * 60 * 1000)) response = ambient;
     }
   }
+
+  if (!response) return;
+  log(`[Smart Chat] Replying to @${author.username} in #${chId}`);
+  await replyTo(msg, response);
 }
 
 // -------------------------------------------------------------
@@ -894,83 +1088,64 @@ async function handleRepCounterMessage(d) {
   const num = parseInt(match[1], 10);
   const expected = repState.currentCount + 1;
   const userId = d.author.id;
+  const brokenAt = repState.currentCount;
 
-  // 1. Check double-counting
-  if (repState.currentCount > 0 && userId === repState.lastUserId) {
-    try {
-      await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%E2%9D%8C/@me`, {
-        method: "PUT",
-        headers: { Authorization: `Bot ${TOKEN}` }
-      });
-      await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
-        embeds: [
-          {
-            title: "🚨 FORM BREAK // DOUBLE SET FOUL!",
-            description: `<@${userId}> tried to count twice in a row at **${repState.currentCount} reps**!\n\nForm is completely broken. Barbell has been reset back to **1**! Grab your chalk and pick it back up lifters! 🍼`,
-            color: 0xE74C3C,
-            footer: { text: "Chic Gang Barbell Form Checker" },
-            timestamp: new Date().toISOString()
-          }
-        ]
-      });
-    } catch (e) {}
+  let foul = null;
+  if (brokenAt > 0 && userId === repState.lastUserId) {
+    foul = { title: "❌ Counted twice: set reset", reason: `<@${userId}> counted twice in a row. One number each, then let someone else go.` };
+  } else if (num !== expected) {
+    foul = { title: "❌ Wrong number: set reset", reason: `<@${userId}> said **${num}**, but the next rep was **${expected}**.` };
+  }
+
+  if (foul) {
+    reactEmoji(REP_COUNTER_CH, d.id, "❌");
     repState.currentCount = 0;
     repState.lastUserId = null;
     saveRepState();
-    return;
-  }
 
-  // 2. Check wrong number
-  if (num !== expected) {
+    // Nothing was lost if the count was already at zero, so the ❌ is enough
+    if (brokenAt === 0) return;
+
     try {
-      await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%E2%9D%8C/@me`, {
-        method: "PUT",
-        headers: { Authorization: `Bot ${TOKEN}` }
-      });
       await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
         embeds: [
-          {
-            title: "🚨 FORM BREAK // MISSED REP!",
-            description: `<@${userId}> counted **${num}**, but the barbell needed **${expected}**!\n\nThe set was ruined at **${repState.currentCount} reps**. Count reset to **1**! Lock in lifters! 🍼`,
-            color: 0xE74C3C,
-            footer: { text: "Chic Gang Barbell Form Checker" },
-            timestamp: new Date().toISOString()
-          }
-        ]
+          embed({
+            title: foul.title,
+            description: `${foul.reason}\n${DIVIDER}\nThe set ended at **${brokenAt.toLocaleString()}** rep${brokenAt === 1 ? "" : "s"}. Server record: **${(repState.best || brokenAt).toLocaleString()}**.\nStart again from **1**.`,
+            color: COLORS.alert,
+            footer: "Chic Gang · Rep counter"
+          })
+        ],
+        allowed_mentions: NO_PINGS
       });
     } catch (e) {}
-    repState.currentCount = 0;
-    repState.lastUserId = null;
-    saveRepState();
     return;
   }
 
-  // 3. Clean Rep!
+  // Clean rep
   repState.currentCount = num;
   repState.lastUserId = userId;
+  if (num > (repState.best || 0)) repState.best = num;
   saveRepState();
 
-  try {
-    await fetch(`https://discord.com/api/v10/channels/${REP_COUNTER_CH}/messages/${d.id}/reactions/%F0%9F%8F%8B%EF%B8%8F/@me`, {
-      method: "PUT",
-      headers: { Authorization: `Bot ${TOKEN}` }
-    });
-  } catch (e) {}
+  reactEmoji(REP_COUNTER_CH, d.id, "✅");
 
-  // Milestones
   const milestones = [25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
   if (milestones.includes(num)) {
+    const next = milestones.find(m => m > num);
     try {
       await discordApi(`/channels/${REP_COUNTER_CH}/messages`, "POST", {
         embeds: [
-          {
-            title: `🏆 BARBELL MILESTONE // ${num.toLocaleString()} REPS LOCKED!`,
-            description: `**HEAVY WORKING SET MILESTONE ACHIEVED!**\n<@${userId}> just racked Rep **#${num.toLocaleString()}** on the community barbell!\n\nKeep rhythm, maintain strict form, and push to the next milestone! 🏋️‍♂️⚡🔥`,
-            color: 0xF1C40F,
-            footer: { text: "Chic Gang Strength Milestone" },
-            timestamp: new Date().toISOString()
-          }
-        ]
+          embed({
+            title: `🏆 ${num.toLocaleString()} reps`,
+            description: `<@${userId}> hit rep **#${num.toLocaleString()}** on the community bar.\n${DIVIDER}\n` +
+              (next ? `Next milestone: **${next.toLocaleString()}**. Keep it clean.` : `That's the final milestone. Legendary set.`),
+            color: COLORS.gold,
+            image: GIF("milestone"),
+            footer: "Chic Gang · Rep counter"
+          })
+        ],
+        allowed_mentions: NO_PINGS
       });
     } catch (e) {}
   }
@@ -979,45 +1154,63 @@ async function handleRepCounterMessage(d) {
 // -------------------------------------------------------------
 // Disboard Bump Detection & Cooldown
 // -------------------------------------------------------------
+const BUMP_STATE_FILE = process.env.BUMP_STATE_FILE || "./bump-state.json";
 let bumpTimeout = null;
+
+// The reminder time is saved to disk so a restart doesn't lose it
+function scheduleBumpReminder(readyAtMs) {
+  if (bumpTimeout) clearTimeout(bumpTimeout);
+  bumpTimeout = setTimeout(async () => {
+    try {
+      log(`[Bump] Cooldown over. Pinging bump reminder...`);
+      await discordApi(`/channels/${BUMP_CH}/messages`, "POST", {
+        content: `<@&${BUMP_PING_ROLE_ID}> The Disboard bump is ready. Type \`/bump\` to push Chic Gang back up the list.`,
+        allowed_mentions: { roles: [BUMP_PING_ROLE_ID] }
+      });
+    } catch (err) {
+      log(`[Bump Reminder Error] ${err.message}`);
+    }
+    try { fs.unlinkSync(BUMP_STATE_FILE); } catch (e) {}
+  }, Math.max(0, readyAtMs - Date.now()));
+}
+
+function restoreBumpReminder() {
+  try {
+    const { readyAt } = JSON.parse(fs.readFileSync(BUMP_STATE_FILE, 'utf8'));
+    if (readyAt) {
+      scheduleBumpReminder(readyAt);
+      log(`[Bump] Restored reminder for ${new Date(readyAt).toISOString()}`);
+    }
+  } catch (e) {}
+}
 
 async function handleDisboardMessage(msg) {
   if (msg.author.id !== "302050872383242240") return;
 
   const desc = (msg.embeds && msg.embeds[0] && msg.embeds[0].description) || "";
   const isBumpSuccess = desc.includes("Bump done!") || desc.includes("Check it on DISBOARD");
+  if (!isBumpSuccess) return;
 
-  if (isBumpSuccess) {
-    const bumpDurationMs = 2 * 60 * 60 * 1000;
-    const readyAtDate = new Date(Date.now() + bumpDurationMs);
-    const unixStamp = Math.floor(readyAtDate.getTime() / 1000);
+  const readyAt = Date.now() + 2 * 60 * 60 * 1000;
+  const unixStamp = Math.floor(readyAt / 1000);
+  const bumperId = msg.interaction_metadata?.user?.id || msg.interaction?.user?.id;
 
-    log(`[Bump] Disboard bump successful! Next bump at ${readyAtDate.toISOString()}`);
+  log(`[Bump] Disboard bump successful! Next bump at ${new Date(readyAt).toISOString()}`);
 
-    await discordApi(`/channels/${BUMP_CH}/messages`, "POST", {
-      embeds: [
-        {
-          title: "🚀 SERVER BUMP RECORDED // COOLDOWN LOCKED",
-          description: `Thank you for bumping **Chic Gang** on Disboard!\n\n⏳ **Next bump ready:** <t:${unixStamp}:R> (<t:${unixStamp}:T>)\n\nChic Bot will ping <@&${BUMP_PING_ROLE_ID}> the second the 2-hour window opens!`,
-          color: 0x2ECC71,
-          footer: { text: "Chic Gang Growth Engine • Disboard Tracker" },
-          timestamp: new Date().toISOString()
-        }
-      ]
-    });
+  try { fs.writeFileSync(BUMP_STATE_FILE, JSON.stringify({ readyAt })); } catch (e) {}
+  scheduleBumpReminder(readyAt);
 
-    if (bumpTimeout) clearTimeout(bumpTimeout);
-    bumpTimeout = setTimeout(async () => {
-      try {
-        log(`[Bump] 2 hours elapsed! Pinging bump reminder...`);
-        await discordApi(`/channels/${BUMP_CH}/messages`, "POST", {
-          content: `📢 <@&${BUMP_PING_ROLE_ID}> **TIME TO BUMP!**\nType \`/bump\` right now to push **Chic Gang** to the top of Disboard rankings! ⚡🚀💪`
-        });
-      } catch (err) {
-        log(`[Bump Reminder Error] ${err.message}`);
-      }
-    }, bumpDurationMs);
-  }
+  await discordApi(`/channels/${BUMP_CH}/messages`, "POST", {
+    embeds: [
+      embed({
+        title: "🚀 Bump recorded",
+        description: (bumperId ? `Thanks for the bump, <@${bumperId}>.\n` : `Thanks for the bump.\n`) +
+          `${DIVIDER}\n**Next bump:** <t:${unixStamp}:R> (<t:${unixStamp}:t>)\nI'll ping <@&${BUMP_PING_ROLE_ID}> when it's ready.`,
+        footer: "Chic Gang · Disboard tracker"
+      })
+    ],
+    allowed_mentions: NO_PINGS
+  }).catch(e => log(`[Bump Post Err] ${e.message}`));
 }
 
 // -------------------------------------------------------------
@@ -1314,15 +1507,18 @@ function initDankMemerReminders() {
   if (dankInterval) clearInterval(dankInterval);
   dankInterval = setInterval(async () => {
     try {
+      // Skip if nobody has posted since the last reminder, so reminders never stack up in a quiet channel
+      const [last] = await discordApi(`/channels/${DANK_MEMER_CH}/messages?limit=1`);
+      if (last?.author?.id === BOT_ID) return;
+
       await discordApi(`/channels/${DANK_MEMER_CH}/messages`, "POST", {
         embeds: [
-          {
-            title: "🐸 DANK MEMER COOLDOWN CHECK // GRIND TIME",
-            description: "**Time to stack your gym balance!**\nRun your commands right now to maximize your wallet:\n\n• `/daily` — Claim free coins streak\n• `/work` — Clock into your shift\n• `/beg` — Grab some street cash\n• `/hunt` & `/fish` — Gather rare catches\n• `/deposit all` — Protect your bag from robbers!\n\n*Keep grinding the gym economy 24/7!*",
-            color: 0x2ECC71,
-            footer: { text: "Chic Gang Arcade Sentinel" },
-            timestamp: new Date().toISOString()
-          }
+          embed({
+            title: "🐸 Dank Memer cooldowns are up",
+            description: "`/work` · `/beg` · `/hunt` · `/fish` · `/daily` if you haven't yet\n" +
+              `${DIVIDER}\nFinish with \`/deposit all\` so nobody can rob you.`,
+            footer: "Chic Gang · Reminder every 45 min while the channel is active"
+          })
         ]
       });
       log(`[Dank Memer] Periodic grind reminder dispatched to #${DANK_MEMER_CH}`);
@@ -1335,6 +1531,7 @@ function initDankMemerReminders() {
 // -------------------------------------------------------------
 let memeInterval = null;
 const postedMemeUrls = new Set();
+const MEME_INTERVAL_MS = 60 * 60 * 1000;
 
 async function postAutomatedMemeDrop() {
   try {
@@ -1343,7 +1540,7 @@ async function postAutomatedMemeDrop() {
     const res = await fetch(`https://meme-api.com/gimme/${sub}/5`);
     if (!res.ok) return;
     const data = await res.json();
-    const memes = (data.memes || []).filter(m => m.url && !m.nsfw && !postedMemeUrls.has(m.url));
+    const memes = (data.memes || []).filter(m => m.url && !m.nsfw && !m.spoiler && !postedMemeUrls.has(m.url));
     if (memes.length === 0) return;
 
     const meme = memes[0];
@@ -1353,50 +1550,87 @@ async function postAutomatedMemeDrop() {
       postedMemeUrls.delete(first);
     }
 
-    const postRes = await fetch(`https://discord.com/api/v10/channels/${MEMES_CH}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bot ${TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        embeds: [{
-          title: meme.title || 'Gym Meme Drop',
-          url: meme.postLink,
-          image: { url: meme.url },
-          color: 0x2ECC71,
-          footer: { text: `r/${meme.subreddit} • u/${meme.author} • 👍 ${meme.ups || 0} upvotes` },
-          timestamp: new Date().toISOString()
-        }]
-      })
+    const card = embed({
+      title: (meme.title || "Gym meme").slice(0, 256),
+      footer: `r/${meme.subreddit} · 👍 ${(meme.ups || 0).toLocaleString()}`
+    });
+    card.url = meme.postLink;
+    card.image = { url: meme.url };
+
+    const msg = await discordApi(`/channels/${MEMES_CH}/messages`, "POST", {
+      embeds: [card],
+      allowed_mentions: NO_PINGS
     });
 
-    if (postRes.ok) {
-      const msg = await postRes.json();
-      log(`[Meme Drop] Posted meme "${meme.title}" to #${MEMES_CH} (ID: ${msg.id})`);
-      for (const emoji of ['🔥', '💪', '😂']) {
-        try {
-          await fetch(`https://discord.com/api/v10/channels/${MEMES_CH}/messages/${msg.id}/reactions/${encodeURIComponent(emoji)}/@me`, {
-            method: 'PUT',
-            headers: { Authorization: `Bot ${TOKEN}` }
-          });
-        } catch (e) {}
-      }
-    }
+    log(`[Meme Drop] Posted meme "${meme.title}" to #${MEMES_CH} (ID: ${msg.id})`);
+    reactEmoji(MEMES_CH, msg.id, "😂");
   } catch (err) {
     log(`[Meme Drop Err] ${err.message}`);
   }
 }
 
-function initAutomatedMemeDrops() {
+async function initAutomatedMemeDrops() {
   if (memeInterval) clearInterval(memeInterval);
-  setTimeout(postAutomatedMemeDrop, 15000);
-  memeInterval = setInterval(postAutomatedMemeDrop, 60 * 60 * 1000);
+
+  // Read recent drops so a restart neither reposts old memes nor posts early
+  let wait = 15000;
+  try {
+    const recent = await discordApi(`/channels/${MEMES_CH}/messages?limit=50`);
+    const ours = (recent || []).filter(m => m.author?.id === BOT_ID && m.embeds?.[0]?.image?.url);
+    for (const m of ours) postedMemeUrls.add(m.embeds[0].image.url);
+    if (ours[0]) {
+      wait = Math.max(15000, Date.parse(ours[0].timestamp) + MEME_INTERVAL_MS - Date.now());
+    }
+  } catch (e) {}
+
+  log(`[Meme Drop] Next drop in ${Math.round(wait / 60000)} min`);
+  setTimeout(() => {
+    postAutomatedMemeDrop();
+    memeInterval = setInterval(postAutomatedMemeDrop, MEME_INTERVAL_MS);
+  }, wait);
 }
 
 // -------------------------------------------------------------
-// Interactive UI Handler (Sub-30ms Instant Response)
+// Interactive UI Handler (buttons, menus, modals)
 // -------------------------------------------------------------
+// One rulebook, used by both the section picker and the full-rules button
+const RULE_SECTIONS = {
+  rule_sec_1: {
+    title: "🔒 Section I: Safety",
+    color: COLORS.alert,
+    body:
+      "**1. No NSFW or gore.** Not in channels, avatars or names. Permanent ban.\n" +
+      "**2. No harassment, slurs or doxxing.** Zero tolerance for personal attacks, threats or sharing private info.\n" +
+      "**3. No scams or malicious links.** Unapproved ads, pirated software and token grabbers mean a permanent ban."
+  },
+  rule_sec_2: {
+    title: "⚡ Section II: Gym floor etiquette",
+    color: COLORS.gold,
+    body:
+      "**1. Critique the form, not the person.** Keep feedback constructive. No ego-lift shaming.\n" +
+      "**2. No dangerous advice.** No PED cycles, unsafe medical regimens or extreme dehydration cuts.\n" +
+      "**3. Keep it honest.** No fake PRs or edited lift numbers.\n" +
+      `**4. Use the right channel.** Memes in <#${MEMES_CH}>, bot commands in <#${BOT_CORNER_CH}>, training talk in <#${FITNESS_TALK_CH}>.`
+  },
+  rule_sec_3: {
+    title: "🛡️ Section III: Consequences",
+    color: COLORS.bot,
+    body:
+      "**1st offense:** Warning, logged on your record.\n" +
+      "**2nd offense:** 24-hour timeout.\n" +
+      "**3rd offense:** 7-day ban.\n" +
+      "**Severe offenses** (NSFW, doxxing, scams, exploits, hate speech): permanent ban, no warning."
+  },
+  rule_sec_report: {
+    title: "🎫 Reporting a problem",
+    color: COLORS.info,
+    body: `Use the **Open Support Ticket** button, or go to <#${CONTACT_CH}>. A private channel opens that only you and staff can see.`
+  }
+};
+
+const ephemeral = (content) => ({ type: 4, data: { content, flags: 64, allowed_mentions: NO_PINGS } });
+const ephemeralEmbeds = (embeds) => ({ type: 4, data: { embeds, flags: 64 } });
+
 async function handleInteraction(interaction) {
   const { id, token, data, member, user: directUser, type, channel_id } = interaction;
   const user = member?.user || directUser;
@@ -1407,41 +1641,53 @@ async function handleInteraction(interaction) {
 
     if (customId === "verify_btn") {
       log(`[Interaction] Processing verify_btn for @${user?.username} (${userId})`);
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          content: `✅ **VERIFIED!** Welcome to Chic Gang, <@${userId}>! Roles \`✅ Verified\` and \`⚡ Member\` unlocked. Lock in and hit your sets! 💪⚡`,
-          flags: 64
-        }
-      });
+      if ((member?.roles || []).includes(VERIFIED_ROLE_ID)) {
+        await respondInteraction(id, token, ephemeral(`You're already verified. Say hi in <#${GENERAL_CH}>.`));
+        return;
+      }
 
-      discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${VERIFIED_ROLE_ID}`, "PUT")
-        .then(() => discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${MEMBER_ROLE_ID}`, "PUT"))
-        .catch(err => log(`[Verify Role Assignment Err] ${err.message}`));
+      // Defer first so slow role assignment can't time out the button
+      await respondInteraction(id, token, { type: 5, data: { flags: 64 } });
+      try {
+        await discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${VERIFIED_ROLE_ID}`, "PUT");
+        await discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${MEMBER_ROLE_ID}`, "PUT");
+        await editOriginal(token, {
+          embeds: [
+            embed({
+              title: "✅ You're in",
+              description:
+                `Welcome to Chic Gang, <@${userId}>. The full server is unlocked.\n${DIVIDER}\n` +
+                `**Next:** pick your training style in <#${SELF_ROLES_CH}> and say hi in <#${GENERAL_CH}>.`,
+              image: GIF("verified"),
+              footer: "Chic Gang · Only you can see this",
+              timestamp: false
+            })
+          ],
+          allowed_mentions: NO_PINGS
+        });
+      } catch (err) {
+        log(`[Verify Role Assignment Err] ${err.message}`);
+        await editOriginal(token, {
+          content: `Verification didn't go through on our side. Try again in a minute. If it keeps failing, open a ticket in <#${CONTACT_CH}>.`
+        });
+      }
       return;
     }
 
     if (customId.startsWith("role_")) {
       const roleId = customId.replace("role_", "");
-      const roleName = ALLOWED_SELF_ROLES[roleId] || "Selected Discipline";
+      const roleName = ALLOWED_SELF_ROLES[roleId];
+      if (!roleName) {
+        await respondInteraction(id, token, ephemeral("That role can't be self-assigned."));
+        return;
+      }
 
-      const currentRoles = member?.roles || [];
-      const hasRole = currentRoles.includes(roleId);
-
+      const hasRole = (member?.roles || []).includes(roleId);
       log(`[Interaction] Toggling role ${roleName} (${roleId}) for @${user?.username}: hasRole=${hasRole}`);
 
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          content: hasRole
-            ? `🗑️ Removed discipline: **${roleName}**.`
-            : `⚡ Equipped discipline: **${roleName}**! Stay consistent. 💪`,
-          flags: 64
-        }
-      });
+      await respondInteraction(id, token, ephemeral(hasRole ? `Removed **${roleName}**.` : `Added **${roleName}**.`));
 
-      const method = hasRole ? "DELETE" : "PUT";
-      discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, method)
+      discordApi(`/guilds/${GUILD_ID}/members/${userId}/roles/${roleId}`, hasRole ? "DELETE" : "PUT")
         .catch(err => log(`[Role Toggle Err] ${err.message}`));
       return;
     }
@@ -1464,121 +1710,83 @@ async function handleInteraction(interaction) {
         }
       }
 
-      let summary = "✅ **Roles Synchronized!**\n";
-      if (added.length > 0) summary += `• Equipped: **${added.join(", ")}**\n`;
-      if (removed.length > 0) summary += `• Removed: **${removed.join(", ")}**\n`;
-      if (added.length === 0 && removed.length === 0) summary += "No role changes made.\n";
-      summary += `\n*Keep grinding the discipline!* 💪⚡`;
+      let summary = "## Roles updated\n";
+      if (added.length > 0) summary += `**Added:** ${added.join(", ")}\n`;
+      if (removed.length > 0) summary += `**Removed:** ${removed.join(", ")}\n`;
+      if (added.length === 0 && removed.length === 0) summary = "No changes. You already have that setup.";
 
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          content: summary,
-          flags: 64
-        }
-      });
+      await respondInteraction(id, token, ephemeral(summary));
       return;
     }
 
     if (customId === "view_ranks_guide") {
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          flags: 64,
-          embeds: [
-            {
-              title: "🎖️ CHIC BUILDER // ATHLETE RANK HIERARCHY",
-              description: "Chic Gang ranks are dynamically calculated and unlocked through the **Chic Builder** workout engine. Track your lifts, achieve progressive overload, and unlock official athlete tiers on the server:\n\n🛡️ **Rank 1: Novice Lifter** (Levels 1–4)\n⚔️ **Rank 2: Iron Apprentice** (Levels 5–9)\n⚡ **Rank 3: Gym Regular** (Levels 10–19)\n🔥 **Rank 4: Heavy Lifter** (Levels 20–34)\n🔱 **Rank 5: Elite Athlete** (Levels 35–49)\n👑 **Rank 6: Greek God** (Levels 50–74)\n🌌 **Rank 7: Chic Titan** (Levels 75–99)\n💎 **Rank 8: Spotter Deity** (Levels 100+)\n\n*Log your training sets consistently to rank up and claim your role!*",
-              color: 0xF1C40F,
-              footer: { text: "Chic Gang Athlete Progression • Private Guide" }
-            }
-          ]
-        }
-      });
+      await respondInteraction(id, token, ephemeralEmbeds([
+        embed({
+          title: "🎖️ Athlete ranks",
+          description:
+            "Ranks come from your training in **Chic Builder**. Log your sessions, keep progressing, and your rank climbs.\n" +
+            `${DIVIDER}\n` +
+            "🛡️ **Novice Lifter** · Levels 1–4\n" +
+            "⚔️ **Iron Apprentice** · Levels 5–9\n" +
+            "⚡ **Gym Regular** · Levels 10–19\n" +
+            "🔥 **Heavy Lifter** · Levels 20–34\n" +
+            "🔱 **Elite Athlete** · Levels 35–49\n" +
+            "👑 **Greek God** · Levels 50–74\n" +
+            "🌌 **Chic Titan** · Levels 75–99\n" +
+            "💎 **Spotter Deity** · Level 100+\n" +
+            `${DIVIDER}\n` +
+            "Server chat levels are separate. Check yours with `!rank`.",
+          color: COLORS.gold,
+          footer: "Chic Gang · Only you can see this",
+          timestamp: false
+        })
+      ]));
       return;
     }
 
     if (customId === "view_staff_hierarchy") {
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          flags: 64,
-          embeds: [
-            {
-              title: "👑 Chic Gang | Leadership Hierarchy",
-              description: "**The official server leadership & administration structure:**\n\n• **👑 Co-Founder / Founders** — Core server direction, product vision & engineering.\n• **🛡️ Moderators** — Community safety, form check moderation & respect enforcement.\n• **⚡ Verified Lifters** — Dedicated server athletes with verified status.\n\n*Reach out to any staff member via <#1562037195965993057> if you need assistance!*",
-              color: 0xE74C3C,
-              footer: { text: "Chic Gang Staff Desk" }
-            }
-          ]
-        }
-      });
+      await respondInteraction(id, token, ephemeralEmbeds([
+        embed({
+          title: "👑 Who runs Chic Gang",
+          description:
+            "👑 **Founders** · Server direction, the Chic Builder product and engineering.\n" +
+            "🛡️ **Moderators** · Keep the server safe and enforce the rules.\n" +
+            "✅ **Verified Lifters** · Verified members of the community.\n" +
+            `${DIVIDER}\n` +
+            `Need staff? Open a ticket in <#${CONTACT_CH}>.`,
+          color: COLORS.alert,
+          footer: "Chic Gang · Only you can see this",
+          timestamp: false
+        })
+      ]));
       return;
     }
 
     if (customId === "select_rules_section") {
-      const val = data.values?.[0];
-      let title = "📜 CHIC GANG // RULES SECTION";
-      let desc = "Standard gym code.";
-      let color = 0xE74C3C;
-
-      if (val === "rule_sec_1") {
-        title = "🔒 SECTION I // SERVER SECURITY & SAFETY";
-        desc = "**1. No NSFW or Explicit Media:** Strictly prohibited in all public channels and avatars.\n**2. No Harassment, Slurs, or Doxxing:** Zero tolerance for personal attacks, threats, or releasing private info.\n**3. No Scamming or Malicious Links:** Unauthorized advertising, pirated software, or token grabbers lead to permanent bans.";
-      } else if (val === "rule_sec_2") {
-        title = "⚡ SECTION II // GYM FLOOR ETIQUETTE & LIFTING INTEGRITY";
-        desc = "**1. Respect Form Critiques:** Constructive advice only. Zero ego lifting shaming.\n**2. No Dangerous Advice:** Do not prescribe unverified PED cycles, unsafe medical regimens, or extreme dehydration cuts.\n**3. Channel Routing:** Keep memes in <#1563245239727165601>, bot commands in <#1562037196918227003>, and training discussion in <#1562037196238757920>.";
-      } else if (val === "rule_sec_3") {
-        title = "🛡️ SECTION III // DISCIPLINARY LADDER";
-        desc = "**Violation Severity Scale:**\n• **1st Offense:** Formal warning logged in server record.\n• **2nd Offense:** 24-Hour timeout from all text and voice channels.\n• **3rd Offense:** Temporary 7-day server suspension.\n• **Severe Offenses (Doxxing, Exploits, Hate Speech):** Immediate permanent IP ban.";
-      } else if (val === "rule_sec_report") {
-        title = "🎫 HOW TO REPORT A RULE VIOLATION";
-        desc = "**Need Moderator Assistance?**\nClick the **🎫 Open Support Ticket** button below or head over to <#1562037195965993057> to open a confidential private thread with server staff.";
-        color = 0x3498DB;
-      }
-
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          flags: 64,
-          embeds: [
-            {
-              title,
-              description: desc,
-              color,
-              footer: { text: "Chic Gang Discipline Protocol • Private View" }
-            }
-          ]
-        }
-      });
+      const section = RULE_SECTIONS[data.values?.[0]] || RULE_SECTIONS.rule_sec_1;
+      await respondInteraction(id, token, ephemeralEmbeds([
+        embed({
+          title: section.title,
+          description: section.body,
+          color: section.color,
+          footer: "Chic Gang rules · Only you can see this",
+          timestamp: false
+        })
+      ]));
       return;
     }
 
     if (customId === "view_full_rules") {
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          flags: 64,
-          embeds: [
-            {
-              title: "🔒 SECTION I // SERVER SECURITY & SAFETY",
-              description: "**1. Zero NSFW / Gore:** Immediate permanent ban.\n**2. No Doxxing or Harassment:** Respect lifters' privacy.\n**3. No Scams / Phishing:** Malicious links or unauthorized promo are blocked.",
-              color: 0xE74C3C
-            },
-            {
-              title: "⚡ SECTION II // GYM FLOOR ETIQUETTE",
-              description: "**1. Lifting Respect:** Constructive critique only.\n**2. No Fake PRs:** Keep lifting metrics authentic.\n**3. Stay on designated channels.**",
-              color: 0xF1C40F
-            },
-            {
-              title: "🛡️ SECTION III // DISCIPLINARY LADDER",
-              description: "**Warning ➔ 24h Mute ➔ 7d Ban ➔ Permanent IP Ban**\nFair, strict, and disciplined.",
-              color: 0x9B59B6,
-              footer: { text: "Chic Gang Full Rulebook • Private View" }
-            }
-          ]
-        }
-      });
+      const sections = ["rule_sec_1", "rule_sec_2", "rule_sec_3"].map(k => RULE_SECTIONS[k]);
+      await respondInteraction(id, token, ephemeralEmbeds(
+        sections.map((s, i) => embed({
+          title: s.title,
+          description: s.body,
+          color: s.color,
+          footer: i === sections.length - 1 ? "Chic Gang rules · Only you can see this" : null,
+          timestamp: false
+        }))
+      ));
       return;
     }
 
@@ -1586,7 +1794,7 @@ async function handleInteraction(interaction) {
       await respondInteraction(id, token, {
         type: 9,
         data: {
-          title: "Create a Support Ticket",
+          title: "Open a support ticket",
           custom_id: "ticket_modal",
           components: [
             {
@@ -1595,11 +1803,11 @@ async function handleInteraction(interaction) {
                 {
                   type: 4,
                   custom_id: "ticket_topic",
-                  label: "What do you need assistance with?",
+                  label: "What do you need help with?",
                   style: 1,
                   min_length: 3,
                   max_length: 100,
-                  placeholder: "e.g. Bug report, Google Play testing invite, or App feedback",
+                  placeholder: "e.g. Bug report, Play Store testing invite, app feedback",
                   required: true
                 }
               ]
@@ -1610,11 +1818,11 @@ async function handleInteraction(interaction) {
                 {
                   type: 4,
                   custom_id: "ticket_details",
-                  label: "Provide additional details",
+                  label: "Details",
                   style: 2,
                   min_length: 10,
                   max_length: 1000,
-                  placeholder: "Share phone model, Android OS version, or relevant logs...",
+                  placeholder: "Phone model, Android version, steps to reproduce, anything that helps.",
                   required: true
                 }
               ]
@@ -1626,34 +1834,41 @@ async function handleInteraction(interaction) {
     }
 
     if (customId === "close_ticket") {
+      const channelName = interaction.channel?.name;
+      if (channelName && !channelName.startsWith("ticket-")) {
+        await respondInteraction(id, token, ephemeral("This button only works inside a ticket."));
+        return;
+      }
+
       await respondInteraction(id, token, {
         type: 4,
         data: {
-          content: `🔒 **Ticket is being closed by <@${userId}>.** Channel will delete in 5 seconds. Thank you!`
+          content: `🔒 Ticket closed by <@${userId}>. This channel will be deleted in 10 seconds.`,
+          allowed_mentions: NO_PINGS
         }
       });
+
+      await postServerLog(
+        "Ticket closed",
+        `**Ticket:** \`${channelName || channel_id}\`\n**Closed by:** <@${userId}>`,
+        COLORS.info
+      );
 
       setTimeout(async () => {
         try {
           await discordApi(`/channels/${channel_id}`, "DELETE");
         } catch (e) {}
-      }, 5000);
+      }, 10000);
       return;
     }
   }
 
   if (type === 5) {
     if (data.custom_id === "ticket_modal") {
-      const topic = data.components[0]?.components[0]?.value || "General Support";
+      const topic = data.components[0]?.components[0]?.value || "General support";
       const details = data.components[1]?.components[0]?.value || "No details provided.";
 
-      await respondInteraction(id, token, {
-        type: 4,
-        data: {
-          content: `⚡ Creating your ticket room right now, please wait a moment...`,
-          flags: 64
-        }
-      });
+      await respondInteraction(id, token, { type: 5, data: { flags: 64 } });
 
       try {
         const sanitizedName = user?.username ? user.username.toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 12) : "user";
@@ -1674,39 +1889,185 @@ async function handleInteraction(interaction) {
           ]
         });
 
+        // Only the opener and the mod role get pinged; text typed into the form can never ping anyone
         await discordApi(`/channels/${newTicketChan.id}/messages`, "POST", {
-          content: `Hey <@${userId}>! Staff has been pinged.`,
+          content: `<@${userId}> <@&${MOD_ROLE_ID}>`,
           embeds: [
-            {
-              title: `🎫 SUPPORT TICKET // #${newTicketChan.name}`,
-              description: `**Welcome <@${userId}>!**\nThank you for reaching out to the Chic Gang team.\n\n**Topic:**\n\`${topic}\`\n\n**Details:**\n${details}`,
-              color: 0x3498DB
-            }
+            embed({
+              title: `🎫 ${topic}`.slice(0, 256),
+              description:
+                `Opened by <@${userId}>. A staff member will reply here soon, so no need to ping anyone again.\n` +
+                `${DIVIDER}\n### Details\n${details}`,
+              color: COLORS.info,
+              footer: `Chic Gang · #${newTicketChan.name}`
+            })
           ],
           components: [
             {
               type: 1,
               components: [
-                { type: 2, custom_id: "close_ticket", label: "🔒 Close Ticket", style: 4 }
+                { type: 2, custom_id: "close_ticket", label: "Close Ticket", emoji: { name: "🔒" }, style: 4 }
               ]
             }
-          ]
+          ],
+          allowed_mentions: { users: [userId], roles: [MOD_ROLE_ID] }
         });
+
+        await editOriginal(token, { content: `Your ticket is open: <#${newTicketChan.id}>` });
+        await postServerLog(
+          "Ticket opened",
+          `**Ticket:** <#${newTicketChan.id}>\n**Opened by:** <@${userId}>\n**Topic:** ${topic}`,
+          COLORS.info
+        );
       } catch (err) {
         log(`[Create Ticket Err] ${err.message}`);
+        await editOriginal(token, { content: `Couldn't create your ticket. Try again, or message a moderator directly.` });
       }
       return;
     }
   }
 
   if (type === 2) {
-    const cmd = data.name;
-    return respondInteraction(id, token, {
-      type: 4,
-      data: {
-        content: `⚡ Command **/${cmd}** processed successfully by Chic Bot! Lock in and keep training! 💪`
+    return respondInteraction(id, token, ephemeral(
+      `That command isn't available here yet. Type \`!help\` in <#${BOT_CORNER_CH}> to see what I can do.`
+    ));
+  }
+}
+
+// -------------------------------------------------------------
+// Panel Refresh: restyles the bot's own panel posts on boot. Buttons and menus are left untouched.
+// -------------------------------------------------------------
+const PANEL_CHANNELS = [...new Set([VERIFY_CH, START_HERE_CH, ROLES_CH, RULES_CH, SELF_ROLES_CH, CONTACT_CH])];
+
+const PANELS = {
+  verify: () => [
+    embed({
+      title: "⚡ Verify to enter Chic Gang",
+      description:
+        "Tap **Verify** below to unlock the full server. It's instant.\n" +
+        `${DIVIDER}\n` +
+        "### By verifying, you agree to\n" +
+        "**1.** Keep it respectful. Critique the form, not the person.\n" +
+        "**2.** Keep it safe for work, in chat and on your profile.\n" +
+        `**3.** Follow the rules in <#${RULES_CH}>.`,
+      image: GIF("welcome"),
+      footer: "Chic Gang · Verification",
+      timestamp: false
+    })
+  ],
+  rules: () => [
+    embed({
+      title: "📜 Chic Gang rules",
+      description:
+        "Short version below. Pick a section from the menu to read it in full.\n" +
+        `${DIVIDER}\n` +
+        "**🔒 Safety** · No NSFW, harassment, doxxing or scams.\n" +
+        "**⚡ Gym floor** · Critique the form, not the person. No dangerous advice. Keep your lifts honest.\n" +
+        "**🛡️ Consequences** · Warning, then 24-hour timeout, then 7-day ban. Severe offenses mean a permanent ban, no warning.\n" +
+        `${DIVIDER}\n` +
+        "Something wrong? Open a ticket and only staff will see it.",
+      color: COLORS.alert,
+      footer: "Chic Gang · Rules",
+      timestamp: false
+    })
+  ],
+  roles: () => [
+    embed({
+      title: "🏋️ Pick your roles",
+      description:
+        "Choose what fits you. Pick again anytime to change your setup.\n" +
+        `${DIVIDER}\n` +
+        Object.values(ALLOWED_SELF_ROLES).map(n => `**${n}**`).join(" · ") +
+        `\n${DIVIDER}\n` +
+        "Ping roles are opt-in. You only get pinged for what you pick.",
+      footer: "Chic Gang · Self roles",
+      timestamp: false
+    })
+  ],
+  ticket: () => [
+    embed({
+      title: "🎫 Contact staff",
+      description:
+        "Tap **Open Support Ticket** to start a private channel with the team. Only you and staff can see it.\n" +
+        `${DIVIDER}\n` +
+        "### Good reasons to open one\n" +
+        "**·** Bugs or feedback for Chic Builder\n" +
+        "**·** Play Store testing invites\n" +
+        "**·** Reporting a member or a rule break\n" +
+        "**·** Anything you'd rather not post publicly",
+      color: COLORS.info,
+      footer: "Chic Gang · Support",
+      timestamp: false
+    })
+  ],
+  start: () => [
+    embed({
+      title: "👋 Start here",
+      description:
+        "New to Chic Gang? Here's how the server works.\n" +
+        `${DIVIDER}\n` +
+        `**1.** Verify in <#${VERIFY_CH}>.\n` +
+        `**2.** Read the rules in <#${RULES_CH}>.\n` +
+        `**3.** Pick your roles in <#${SELF_ROLES_CH}>.\n` +
+        `**4.** Talk training in <#${FITNESS_TALK_CH}> and post your wins in <#${WINS_CH}>.\n` +
+        `${DIVIDER}\n` +
+        "Use the buttons below to see the athlete ranks and who runs the server.",
+      image: GIF("welcome"),
+      footer: "Chic Gang · Start here",
+      timestamp: false
+    })
+  ]
+};
+
+function collectCustomIds(components, out = []) {
+  for (const c of components || []) {
+    if (c.custom_id) out.push(c.custom_id);
+    if (c.components) collectCustomIds(c.components, out);
+  }
+  return out;
+}
+
+function panelFor(ids) {
+  if (ids.includes("verify_btn")) return "verify";
+  if (ids.includes("select_rules_section") || ids.includes("view_full_rules")) return "rules";
+  if (ids.includes("select_roles") || ids.some(id => id.startsWith("role_"))) return "roles";
+  if (ids.includes("view_ranks_guide") || ids.includes("view_staff_hierarchy")) return "start";
+  if (ids.includes("open_ticket")) return "ticket";
+  return null;
+}
+
+async function refreshPanels() {
+  for (const chId of PANEL_CHANNELS) {
+    let msgs = [];
+    try {
+      msgs = await discordApi(`/channels/${chId}/messages?limit=50`);
+    } catch (e) {
+      log(`[Panels] Could not read #${chId}: ${e.message}`);
+      continue;
+    }
+
+    for (const m of msgs || []) {
+      if (m.author?.id !== BOT_ID || !m.components?.length) continue;
+      const kind = panelFor(collectCustomIds(m.components));
+      if (!kind) continue;
+
+      const fresh = PANELS[kind]();
+      const upToDate = !m.content &&
+        m.embeds?.length === fresh.length &&
+        m.embeds.every((e, i) => e.title === fresh[i].title && e.description === fresh[i].description);
+      if (upToDate) continue;
+
+      try {
+        await discordApi(`/channels/${chId}/messages/${m.id}`, "PATCH", {
+          content: "",
+          embeds: fresh,
+          allowed_mentions: NO_PINGS
+        });
+        log(`[Panels] Restyled ${kind} panel ${m.id} in #${chId}`);
+      } catch (e) {
+        log(`[Panels] Could not edit ${kind} panel ${m.id}: ${e.message}`);
       }
-    });
+    }
   }
 }
 
@@ -1957,6 +2318,8 @@ async function bootstrap() {
   connectGateway();
   initDankMemerReminders();
   initAutomatedMemeDrops();
+  restoreBumpReminder();
+  setTimeout(refreshPanels, 5000);
 
   if (auditInterval) clearInterval(auditInterval);
   auditInterval = setInterval(reconcileRecentJoins, 5000);
